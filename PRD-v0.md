@@ -215,6 +215,7 @@ The following are deliberately *not* in v0. Each was considered and pushed to v1
 - Official, paid, or ticketed events (concerts, venue events, promoter listings). Eventbrite-shaped products serve those.
 - AR mode (camera-overlaid pins).
 - Full 3D map rendering. Selective landmark extrusion is a v1 candidate.
+- Photorealistic 3D flyover cinematics (e.g., "fly to event" via Google's Maps 3D SDK for iOS). v2+ candidate; depends on paid/featured events landing first and the SDK leaving Experimental.
 - Manual per-Commit Host approval (only rule-based auto-gating in v0).
 - Gender-based gating rules and women-only events (require gender verification).
 - Atomic-pair "I'll only Commit if my friend Commits" mode.
