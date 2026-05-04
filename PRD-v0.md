@@ -74,7 +74,7 @@ The product is *not* targeting: people seeking deep recurring community (Meetup 
 ### Committing and Withdrawing
 
 22. As an Attendee, I want to Commit to an Event with one tap, so that joining feels frictionless.
-23. As an Attendee, I want to Withdraw my Commit at any time without a guilt-trippy interface, so that releasing my spot feels strictly preferable to ghosting.
+23. As an Attendee, I want to Withdraw my Commit at any time **before the Event goes Live**, without a guilt-trippy interface, so that releasing my spot feels strictly preferable to ghosting. (Once Live, Withdraw is unavailable — outcome is Show or Ghost.)
 24. As an Attendee, I want to know that my Withdrawal will count differently depending on when it happens (early = clean; late on a β-Event = a Flake; not Withdrawing and not Showing up = Ghost), so that I can choose honestly.
 25. As an Attendee on a β-Event, I want my Withdrawal to be reflected immediately in the count and to potentially re-open the slot to nearby users, so that flakes turn into opportunities for someone else.
 ### Privacy and presence
@@ -100,7 +100,7 @@ The product is *not* targeting: people seeking deep recurring community (Meetup 
 35. As a Host, I want to see prospective Attendees' Attendee rep so I can decide whether to set a rep gate, so that I can shape the room's reliability.
 36. As a new user with no rep yet, I want to be visibly *Unrated* rather than low-rep, so that I'm not punished for being new.
 37. As any user, I want my flags to be anonymous to the people I'm flagging, so that I can speak honestly without fear of retaliation.
-38. As a user who experiences a serious safety incident (harassment, threats, assault), I want a clearly distinct **Report** path that goes to a human moderation queue with severity tiers, so that the system treats it as more than a rating signal.
+38. *(Deferred post-v0.)* As a user who experiences a serious safety incident (harassment, threats, assault), I want a clearly distinct **Report** path that goes to a human moderation queue with severity tiers, so that the system treats it as more than a rating signal. — Deferred because v0 has no human moderation team; see §Out of scope.
 
 ### Friends
 
@@ -144,22 +144,31 @@ The following capabilities define the platform. Each is grounded in the design c
 - β-Events default to a Tip deadline of `start_time - 1hr`. The Seeder may adjust this at creation within bounds: no later than `start_time - 15min`, no earlier than `creation_time` (i.e., the deadline must lie between event creation and 15 minutes before start). If the Event has not Tipped by the deadline, it Cancels and notifies the Seeder + any Committed Attendees.
 - A Filling β-Event also auto-Cancels if its Commit count drops to 0 before the deadline (e.g., the Seeder and any others all Withdraw). This is a mechanical cleanup — there's no collective left to honor — and is **not** a back-door Seeder-cancellation, since it requires the Seeder *and* all others to have Withdrawn independently.
 
+**Event editing post-creation** (per ADR 0012)
+- Edit permission depends on lifecycle phase and field. Pre-first-Commit, all fields are editable. Post-first-Commit (pre-Live), only title, description, Cap (increase only), and gating rules (loosen only) are editable. Live or later: nothing is editable. Locked fields: category, `start_time`, `end_time`, location (real pin, fuzzed pin, visibility), Tip threshold (β), Tip deadline (β).
+- **Material changes** to a locked field after first Commit require **cancel-and-recreate** (α-Hosts only; Seeders cannot cancel per ADR 0001). The new Event carries a `supersedes_event_id` link to the cancelled one.
+- Active Attendees of the cancelled Event (those who hadn't Withdrawn at cancellation time) receive a **recommit invite** push pointing to the successor: "Event details changed — tap to see new details and recommit." Invite expires when the successor goes Live.
+- Cancellation cost is unchanged — the Host still pays the lateness-scaled rep ding (user story 18). The recommit-invite is an audience-preservation convenience, not a cost-waiver. Symmetric with the Withdraw no-reason-carveout principle: the system doesn't adjudicate why; the rep cost just hits.
+- Title/description edits push a notification to current Attendees (required tier — these are Committed Events). Edits within ~5 minutes coalesce into one push (debounce) to avoid spam during typo-fix sequences.
+
 **Commitment**
-- Commits are reversible at any time before and after Tip. Withdrawal is one-tap.
-- Withdrawal classification: Withdraw (early) = clean; Flake (late) = reputation cost; Ghost (no Withdraw, no Show) = highest reputation cost.
+- Commits are reversible **only before `start_time`**. Withdrawal is one-tap. Once the Event is Live, Withdraw is no longer reachable — outcome becomes binary (Show via check-in/passive, or Ghost). For α-Events with `start_time = creation_time` (immediate-Live), the pre-Live window is zero and Commit is binding from placement.
+- Withdrawal classification (purely time-based, no reason carveout): Withdraw (early) = clean; Flake (late, within 2hr of Live or post-Tip on β) = reputation cost; Ghost (no Withdraw, no Show) = highest reputation cost.
 - Tip is sticky on β-Events: Withdrawals do not un-Tip a Tipped Event, even if the count drops below threshold.
 - Vacated slots reopen up to Cap and may notify nearby users.
 - A Tipped β-Event whose count has dropped below its original Tip threshold is surfaced as **Thinning** — in-app promotional UX (pin treatment, time-slider promotion) to encourage new Commits to restore the room to the Seeder's stated threshold. No push notifications fire for Thinning in v0 (fatigue defense).
+- **Overlapping-Commit warning:** Committing to an Event whose time window overlaps an existing active Commit (`A.start < B.end AND A.end > B.start`; same-second adjacency does not overlap) surfaces a confirmation modal listing the conflicting Event(s) by title, time, and status (Tipped/Filling), and explaining the consequence: "You can only be in one place at once — if you don't Show at one of these, you'll Flake or Ghost and lose reputation." User can continue (system records both Commits) or cancel. **The system does not block the second Commit** — it informs and lets the user choose; the rep system handles the mechanical consequence if they double-book and Ghost. Withdrawn Commits do not count for overlap.
 
 **At-event experience**
 - Presence is resolved by **objective signals only** — check-in tap or passive location confirmation. No peer attestation in the Show/Ghost decision (per ADR 0009).
-- **Check-in tap:** geofence-gated at ~50m around the Event pin, anti-fraud, single GPS query at tap time.
+- **Check-in tap:** accuracy-aware geofence (per ADR 0011) — accepted when `distance_to_pin - horizontalAccuracy <= 50m`. Anti-fraud floor at 50m for confident fixes; honest indoor uncertainty (±80m+) is admitted as Show. Single GPS query at tap time.
 - **Passive location confirmation:** for users who granted iOS "Always Allow" location, any GPS sample within ~150m of the pin during the event window (15 min before scheduled start through scheduled end) confirms Show. Bounded in time, space, scope, and consent. Stops as soon as the event ends or the user leaves the polygon.
 - If neither path produces presence and the Attendee didn't Withdraw, the outcome is Ghost. No third "Soft Ghost" disposition.
+- First presence confirmation (either path) fires a subtle system message into the Event chat. Message text is identical regardless of source — surfacing tap vs passive would leak permission state.
 - Event chats unlock at creation (α) or at Tip (β). Chats remain writable for 24hr after Done, then archive read-only.
 
 **Post-event**
-- Within ~30 minutes of Done, Attendees are prompted with the post-event flow: 👍 / 👎 / skip per fellow Attendee, with a "what happened?" sheet (one or more hard reasons; or "I just didn't like them") on 👎.
+- Within ~30 minutes of Done, Attendees are prompted with the post-event flow: 👍 / 👎 / skip per fellow Attendee, with a "what happened?" sheet (one or more hard reasons; or "I just didn't like them") on 👎. The flow closes 24hr after Done — same cut as the chat archive; signals submitted after that are discarded.
 - Of the captured signals, only **👎-with-hard-reason** moves the recipient's score (via `flag_factor`, see ADR 0008). 👍s and soft 👎s ("I just didn't like them") are captured for the recipient's bundled-feedback display but do not move the score. Score = trustworthiness, not popularity.
 - Following the feedback step, users see fellow Attendees as Friend-request candidates.
 - Show / Ghost disposition is determined entirely by objective signals (check-in + passive location), per ADR 0009.
@@ -199,13 +208,17 @@ The rule: rep number appears at **decision moments** and on **deliberate profile
 **Privacy**
 - Default location-fuzzing for non-Attendees.
 
+**Account deletion** (per ADR 0013)
+- Deletion is initiated by the user from within the app (App Store + GDPR/CCPA compliance). No grace period in v0 — immediate.
+- **Hard-delete:** PII (name, selfie/avatar, phone, DOB), device tokens, geolocation traces (passive GPS samples, check-in coordinates — identifying even without user_id), reputation row, friendships (mirrored rows), pending friendship requests.
+- **Anonymize-and-preserve** (references replaced with a single shared "(deleted user)" tombstone): outcome records (Show/Withdraw/Flake/Ghost — drives others' rep math), flags the user cast (deletion does not unwind effects on recipients — closes a rep-laundering loophole), chat messages (content preserved, sender attribution stripped at render — industry-standard for chat continuity), photos uploaded to chats, post-Tip β-Events they Seeded (Tip is sticky; the collective is bound), past Events.
+- **Hard-cancel** with notification to active Attendees: future α-Events they Hosted, future β-Events pre-Tip.
+- Phone is freed for fresh sign-up; new account is unrelated to old. Rep does not carry across delete-recreate. v0 accepts the rep-laundering gap at personal-project scale; closing it (e.g., phone-hash banning) is gated behind distribution.
+
 **Notifications**
 - Three buckets: required (Committed-event critical), default-on (Committed-event milestones, friend signal), opt-in (general discovery, digests). See CONTEXT.md §Notifications for the per-tier list.
 - Throttling: only **Friend-Attending-nearby** is throttled (1/day cap per user, batched-rollup when multiple candidates qualify). All other tiers fire as state transitions occur; user behavior is the natural rate limiter.
 - Deduplication: achieved via **idempotent state-transition handlers** (each push fires from a handler gated by a single timestamp column on the event row, e.g., `tipped_at`, `cancelled_at`, `starts_soon_pushed_at`). No separate push-receipts table.
-
-**Reports**
-- Distinct from rating flags. Severity tiers (info / concerning / urgent). Urgent reports may auto-restrict pending review. Routed to a human moderation queue.
 
 **Surfaces**
 - Bottom navigation: Map, Your Events, Friends, Profile.
@@ -216,13 +229,13 @@ The rule: rep number appears at **decision moments** and on **deliberate profile
 
 **Safety and trust**
 - Hard floor: 18+, phone-verified, live-selfie-verified (light liveness in v0; see Account and identity).
-- Stranger-meeting must feel safer than the alternative (texting an Instagram acquaintance to hang out). Specific levers: location fuzzing, geofence-gated check-in, anonymous flags, separate report path with severity tiers, friends-only gating option.
+- Stranger-meeting must feel safer than the alternative (texting an Instagram acquaintance to hang out). Specific v0 levers: 18+ phone verification, light selfie liveness, location fuzzing pre-Commit, geofence-gated check-in, anonymous hard-reason flags reducing reputation, friends-only gating option, Withdraw at any time. v0 ships **without** a Report / moderation channel — severe incidents have no in-app remedy and are an accepted out-of-scope risk at personal-project scale.
 - The platform's promise to women considering attending stranger Events is "the count you see is real, the people listed are verified, the Host is accountable." v0's verification floor (phone + light selfie liveness) is honest but limited — the strength of this promise grows materially with the post-v0 upgrade to third-party liveness.
 
 **Privacy**
 - No browsable history of any user's events. Friend signal is contextual, not browseable.
 - A user's attendance can be hidden from their friend graph at the Event level (attend-privately).
-- Anonymous flags and reports protect users from retaliation.
+- Anonymous flags protect users from retaliation.
 
 **Performance and feel**
 - Cold-start: in v0 the map should feel populated even when actual density is low. A pre-signup demo seeds the perception of activity. The 72hr default time horizon is chosen partly for this reason.
@@ -249,13 +262,11 @@ This section records v0 stack/implementation decisions that aren't surprising en
 **Reputation system:**
 - Score formula is locked in ADR 0008. `explainers/reputation.html` is the visual companion.
 - **Recompute cadence:** real-time on input mutation. A single Go function `RecomputeReputation(userID)` is fired from (a) the post-event/Done handler (fan-out to all attendees of the Event) and (b) the flag-submit handler (single user). Behavioral input is known instantly at Done; flag input is human-reaction-bound, and the system reacts as fast as flags arrive.
+- **Decay refresh for inactive users:** the 2-year half-life decay (per ADR 0008) applies to outcome contributions in the Bayesian formula, so the cached score drifts from "true" value for users with no recent input mutations. To keep cached scores current, a **daily batch job** in the Go server enumerates all users with a reputation row and calls `RecomputeReputation(user_id)` for each. This bounds cached-score staleness at ≤24hr — well under any meaningful drift over a 2-year half-life. The job is cheap at v0 scale (one simple recompute per user). Scaling concerns (e.g., switching to lazy refresh at read) are deferred until user count makes the daily fan-out non-trivial.
 - **Storage:** a separate `reputation` table keyed by `user_id` (NOT a denormalized column on `users`). Minimum fields: `user_id` (PK, FK), `attendee_score`, `host_score` (nullable), `attendee_event_count`, `host_event_count`, `last_recomputed_at`. Source of truth stays in `attendance_outcomes` and `flags`; the reputation row is a denorm cache.
 
 **Push notifications:**
 - APNS direct via `sideshow/apns2` in Go. One device-token table. **No** OneSignal / SNS / FCM intermediary.
-
-**Reports — v0 stopgap:**
-- A `reports` table with severity tier (info / concerning / urgent). Review via Supabase Studio. No purpose-built moderation UI. Real moderation tooling is deferred until distribution.
 
 **Observability — v0 stopgap:**
 - Structured logs via host built-ins (Fly.io / Railway). A small set of metrics-rollup views for product health (Show-rate, Tip-rate, Flake-rate, etc.). DataDog / honeycomb / similar deferred.
@@ -282,6 +293,10 @@ This section records v0 stack/implementation decisions that aren't surprising en
 - Reverse-geocoded `display_label` (e.g., "Pickleball in Venice") deferred — fuzzed pin alone is sufficient for v0.
 - Exact location reveals to a user only after they Commit (per CONTEXT.md §Location fuzzing); not at start time.
 
+**Event editing / cancel-and-recreate (per ADR 0012):**
+- `events.supersedes_event_id` — `uuid` nullable, FK to `events`. Set when an event is created via the cancel-and-recreate path. Used to fan out the recommit-invite push and for analytics on Host-edit behavior.
+- Recommit-invite delivery: on cancel-and-recreate, the Go server enumerates active Attendees of the cancelled Event (those without a Withdraw row at cancellation time) and fans out one APNS push per device with deeplink to the successor's detail card.
+
 ---
 
 ## Out of scope (v0)
@@ -302,13 +317,16 @@ The following are deliberately *not* in v0. Each was considered and pushed to v1
 - 1–5 numeric ratings. Replaced in v0 by the 👍 / 👎 / skip ternary; see ADR 0008.
 - **Attend privately.** Toggle at Commit time that would hide a user from their *own* friend graph in the context of a single Event (per-event random alias to friends; real identity to strangers). Use case: attending a singles meetup or similar without immediate social network noticing. Deferred for two reasons: (1) the projection is nontrivial — same row must render differently to friend vs stranger viewers, requiring a Postgres view layer or Go-only Attendee-detail endpoint with careful auth-aware projection logic; (2) the use case is niche at v0 scale and plausibly unmissed. Vocabulary and design intent preserved in CONTEXT.md for the v1 revisit.
 - **Bring-a-friend (slot-hold invite mechanic).** A mechanic letting an Attendee invite a mutual Friend to an Event they've Committed to, with a slot held for ~10 minutes during which the invited Friend has first-priority claim. Brought Friends would still independently pass all Gating rules. Deferred for v0 because: (1) the underlying coordination is achievable via DMs (in v0) — friends can simply message each other a link and Commit independently; (2) the slot-hold mechanic introduces real concurrency complexity (transactional Cap accounting against active holds, race against stranger Commits, hold-expiry cleanup, public-count semantics) that earns its place only when discovery + cap pressure make the friend race a real problem; (3) the alternatives considered for the public-count behavior (hold consumes slot publicly vs. hold reserved invisibly with race-aware Commit endpoint) carry distinct UX trade-offs that benefit from real usage data before locking in. Vocabulary preserved in CONTEXT.md for the v1 revisit.
-- **User-to-user blocking.** v0 has no block feature. Anti-creep coverage at v0 scale is provided by: hard-reason Flags reducing reputation (ADR 0008), Reports for severe incidents (severity-tiered, manual moderation via Supabase Studio per §Technical posture), Withdraw at any time, and pre-Commit Attendee-list inspection for self-avoidance. Block was considered in two scopes for v1+:
+- **User-to-user blocking.** v0 has no block feature. Anti-creep coverage at v0 scale is provided by: hard-reason Flags reducing reputation (ADR 0008), Withdraw at any time, and pre-Commit Attendee-list inspection for self-avoidance. Block was considered in two scopes for v1+:
   - *Minimal scope* — a `blocks` table with RLS hiding blocker/blocked from each other's friend-suggestion and DM surfaces. Does not prevent co-Commits at the same Event.
   - *Full scope* — minimal-scope plus: blocked cannot Commit to blocker's events, blocker's events not shown on blocked's map, cleanup logic for existing co-Commits, ban-evasion-by-new-account considerations.
-  Reason for deferral: block is a preference-driven user-control feature, not a load-bearing safety primitive — Reports cover the safety cases. Half-blocking (minimal scope) is worse than no blocking for user trust ("I blocked them, why are they still on the map at events?"), so v0 ships without it rather than with a partial implementation. Revisit at v1 with full scope when distribution and demand justify the engineering and RLS complexity.
+  Reason for deferral: at personal-project scale (v0), the user trusts the rep system to bound creep behavior mechanically, and absorbs the residual safety risk consciously. Half-blocking (minimal scope) is worse than no blocking for user trust ("I blocked them, why are they still on the map at events?"), so v0 ships without it rather than with a partial implementation. Revisit at v1 alongside Reports + moderation when distribution justifies the engineering and RLS complexity.
+- **Reports / moderation channel.** Distinct severity-tiered Report path for serious incidents (harassment, threats, assault) routed to a human moderation queue. Deferred because v0 has no moderation team and no realistic plan for one at personal-project scale; a Report channel without humans behind it is a UX promise the system can't keep. v0 absorbs the residual risk: severe incidents not addressable through the rep-flag system have no in-app remedy. Revisit alongside distribution. Vocabulary preserved in CONTEXT.md for the v1 revisit.
 - ID upload as a verification tier.
 - Third-party passive-liveness SDKs (Persona, AWS Rekognition Liveness, FaceTec). v0 uses Apple-native blink/head-turn liveness; upgrading to a third-party passive SDK is a planned post-v0 step once signup volume justifies the per-check cost (~$0.10–$1.00) and the wedge is validated.
 - Multi-city expansion. v0 is LA-only.
+- **30-day grace period for account-deletion undo.** v0 is immediate (per ADR 0013). Standard polish for v1+ if user research shows regret-deletion is a real pattern.
+- **Phone-hash anti-rep-laundering.** v0 accepts that a user can delete and re-sign up with the same phone for a fresh start (no rep carryover). Closing this loophole requires processing identifying data across deletion boundaries, which has its own privacy implications and is gated behind distribution.
 - Capability-gating thresholds beyond the New / Trusted / Restricted distinction, and reputation score-computation specifics. Both deferred until usage data exists.
 - Web platform. Assumed native; final commitment in the technical design pass.
 
@@ -324,11 +342,11 @@ These are unresolved at PRD stage. Each will be addressed in the technical desig
 4. **Cold-start launch strategy** — single LA neighborhood vs. citywide, seeded "anchor" Events run by the team or partners.
 5. **Web vs. native platform** — native is implied by the location/notification/camera-heavy posture, but warrants explicit decision.
 6. **Specific 10-tooltip tutorial copy + pre-signup demo content.**
-7. **Geofence radius for check-in** — ~50m is a starting point; calibration needed for indoor venues.
-8. **Whether check-in unlocks any Live-only chat affordances** (e.g., live-emoji "I'm by the entrance"). Discussed informally; not committed.
+7. ~~**Geofence radius for check-in.**~~ Resolved: accuracy-aware tap (per ADR 0011) — accepted when `distance_to_pin - horizontalAccuracy <= 50m`. Tap-rejection telemetry by category remains valuable for tuning the 50m floor itself.
+8. ~~**Whether check-in unlocks any Live-only chat affordances.**~~ Resolved: first presence confirmation (tap or passive) fires a single subtle system message into the chat; message text is identical regardless of source. No live-emoji, no presence dots, no "I'm by the entrance" affordance in v0.
 9. **Literal notification copy** for Tip, Cancel, starts-soon, slot-opened, and similar push/in-app strings (content-design work; structural commitments are locked in §Functional Requirements and CONTEXT.md).
 10. **Exact prompt copy for the in-app value-prop screens** preceding each iOS system prompt (location upgrade, notifications). The structural commitments are locked in CONTEXT.md §Permission posture; only the literal wording remains as content-design work.
-11. **Failure modes for the 24hr post-event window** — chat archives mid-conversation, photo-upload failure, late-arriving feedback after archival, etc.
+11. ~~**Failure modes for the 24hr post-event window.**~~ Resolved: chat hard-cuts to read-only at 24hr (no activity-based extension); feedback flow closes at the same 24hr mark; photo uploads in flight at the cut are allowed to complete, no new uploads accepted post-cut.
 
 ### Parked recommendations (not yet locked)
 
@@ -336,7 +354,7 @@ These are unresolved at PRD stage. Each will be addressed in the technical desig
 
 ### Known v0 gaps (load-bearing risks)
 
-- **Crashers.** People who didn't Commit but show up at an Event have no in-app handle and therefore cannot be reported through the flag flow (they're not in the Attendee list). Real safety gap; not addressed in v0. Possible v1 fixes: report-by-photo, Host-initiated stranger-add-and-flag, geofence-detected uncommitted-presence.
+- **Crashers.** People who didn't Commit but show up at an Event have no in-app handle and cannot be flagged (they're not in the Attendee list, no `user_id` to attach a flag to). v0's only mitigation is **location fuzzing pre-Commit** — strangers can't see the exact pin until they Commit, which puts them in the Attendee list. Severe crasher incidents have no in-app remedy at v0 scale (Reports / moderation channel deferred per §Out of scope). Possible v1 fixes alongside Reports: report-by-photo, Host-initiated stranger-add-and-flag, geofence-detected uncommitted-presence.
 
 ---
 
@@ -346,7 +364,7 @@ The v0 will be considered a successful launch if:
 
 1. **Strangers Commit and Show.** A meaningful share of β-Events Tip and run with the Attendees who Committed. Show-rate is the primary product-health metric.
 2. **The threshold mechanic feels exciting, not scary.** Users open the app idly and find watching the count tick up rewarding.
-3. **No safety incidents that the report flow doesn't catch and resolve.** Zero is the target; "we caught it and acted" is the realistic floor.
+3. **The rep-flag system bounds bad behavior mechanically.** Hard-reason flags reduce reputation, gating behavior shapes who shows up, and Withdraw is always one tap. Severe incidents requiring human moderation are out of v0 scope and accepted as residual risk at personal-project scale.
 4. **Friend graphs grow.** Stranger → Friend conversion (post-event Friend-add) is healthy.
 5. **The map feels populated.** Even with low density, the cold-start mechanisms (72hr default window, fuzzed pins, demo content) keep the city looking active.
 
@@ -367,4 +385,7 @@ A failure mode to watch: the app feels like Meetup in different paint. If users 
 - `docs/adr/0008-three-tier-reputation-weighting.md` — Reputation has two scoring inputs (behavioral + flag_factor), multiplicative penalty asymmetry, 0–100 scale, 2-year half-life decay.
 - `docs/adr/0009-presence-objective-signals-only.md` — Presence (Show vs Ghost) by objective signals only (check-in tap or passive location). Soft-Ghost removed; flags don't determine presence.
 - `docs/adr/0010-friendships-mirrored-rows.md` — Friendships stored as mirrored two-row pairs (not canonical-pair) for RLS correctness surface. Pending requests in a separate table.
+- `docs/adr/0011-accuracy-aware-checkin-geofence.md` — Check-in tap accepts when `distance_to_pin - horizontalAccuracy <= 50m`; admits honest indoor GPS uncertainty without widening the spoof zone for confident fixes.
+- `docs/adr/0012-event-edits-lock-at-first-commit.md` — Material event fields lock at first Commit; cancel-and-recreate (with recommit invite to original Attendees) preserves audience for genuine material changes; cancellation rep cost is not waived.
+- `docs/adr/0013-account-deletion-anonymize-not-erase.md` — Account deletion hard-deletes PII and identifying traces; anonymizes references in retained system data (outcomes, flags-cast, chat content, post-Tip β-Events) for GDPR/CCPA compliance without disrupting other users.
 - `explainers/reputation.html` — visual companion to the reputation formula in ADR 0008.

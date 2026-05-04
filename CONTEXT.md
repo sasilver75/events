@@ -47,11 +47,13 @@ A user's binding RSVP. On α-Events, an attendance pledge with reputation stake.
 _Avoid_: RSVP, signup, join.
 
 **Withdraw**:
-The verb. A user releases a previously placed Commit. Always available; always one-tap; never punitive in copy. Withdrawing is *preferred* over Ghosting.
+The verb. A user releases a previously placed Commit. Available **only before `start_time`** (i.e., before Live); always one-tap; never punitive in copy. Once the Event is Live, Withdraw is no longer reachable — outcome becomes binary (Show or Ghost) per ADR 0009. Withdrawing pre-Live is *preferred* over Ghosting; late Withdraw is classified as Flake, but it is still cheaper than Ghost. There is **no reason-based carveout** — the system does not adjudicate why a user Withdraws; classification is purely time-based.
+
+For α-Events with `start_time = creation_time` (immediate-Live), the pre-Live window is zero — Commit is binding from the moment of placement. This is consistent with the binding-commitment wedge; users who want a release window should not Commit to immediate-Live Events.
 _Avoid_: cancel (overloaded with Event cancellation), unjoin, leave.
 
 **Flake**:
-A categorization applied to a Withdraw that happens within a "late" window (post-Tip on β-Events; <2hr from Live on either shape). Not a distinct user action — a label the system attaches to a costly-but-honest Withdraw. Reputation-affecting.
+A categorization applied to a Withdraw that happens within a "late" window — post-Tip on β-Events, or within 2hr of `start_time` on either shape. Not a distinct user action — a label the system attaches to a costly-but-honest Withdraw. Reputation-affecting. The Flake window closes at `start_time`; once Live, no Withdraw is possible (Show or Ghost only).
 _Avoid_: bail, late cancel.
 
 **Show**:
@@ -86,13 +88,17 @@ A Flag does **not** determine presence. Show vs Ghost is resolved by objective s
 
 Both Ratings and Flags are **anonymous to the rated user** — they see their score change and possibly aggregate counts, but never who said what. *Deferred post-v0:* weighting flags by the flagger's own credibility (corroborated flags carry more weight; bad-faith flaggers degrade their own signal).
 
+**Report**:
+A separate-from-Flag escalation channel for severe incidents (harassment, threats, assault) — distinct from rep-affecting Flags because the system cannot decide them mechanically and they need human review. *Deferred post-v0* (see PRD-v0 §Out of scope). At v0 scale there is no moderation team and no in-app Report path; severe incidents not addressable through the rep-flag system have no remedy and are accepted as residual risk. Vocabulary preserved here for v1 continuity.
+_Avoid_: complaint, incident ticket, escalation.
+
 **Unrated**:
 The state of a user who has no Attendee or Host rep yet (insufficient history). Treated distinctly from low-rep users — Unrated is a graduated-trust state for newcomers, not a punishment. Specific tier labels and gating thresholds are deferred until capability-gating is actually being designed.
 
 ### Privacy
 
 **Location fuzzing**:
-By default, an Event's exact location is hidden from non-Attendees. The map shows a neighborhood-level pin (e.g., "Venice"). Exact location reveals to a user only after they Commit. The Host/Seeder may opt out at creation for genuinely public events (e.g., "sunset at the pier"). This default protects safety (no scoping/stalking) and event integrity (no crashing).
+By default, an Event's exact location is hidden from non-Attendees. The map shows a neighborhood-level pin (e.g., "Venice"). Exact location reveals to a user only after they Commit — the rule is **uniform regardless of viewer status** (gate-passers, Friends of the Host, and high-rep users all see the fuzzed pin until they Commit). Commit is the trust step that reveals location; weakening that for any class of viewer would weaken the meaning of Commit itself. Hosts who want Friends to see the pin pre-Commit should flip `location_visibility = 'public'` rather than rely on a privileged-viewer shortcut. The Host/Seeder may opt out at creation for genuinely public events (e.g., "sunset at the pier"). This default protects safety (no scoping/stalking) and event integrity (no crashing).
 
 Structural commitment: the **fuzzed pin position is set once at Event creation and never recomputed**. Repeated re-randomization across reads would let an observer triangulate the true location by averaging samples; a single set-once offset eliminates that attack.
 
@@ -101,6 +107,10 @@ A rule attached to an Event at creation that restricts who can Commit. v0 suppor
 
 **Category**:
 Each Event has exactly one Category from a small fixed taxonomy (~10 categories, e.g., Sports, Food/Drink, Music, Outdoors, Games, Social, Creative, Wellness, Networking, Other). Required at creation. Categories drive pin icon/color and map filtering. Structured sub-tags and freeform tags are deferred post-v0.
+
+**Recommit invite**:
+A push notification fanned out to active Attendees of a cancelled Event when the α-Host uses the **cancel-and-recreate** path to materially change a locked field (location, time, category, etc., per ADR 0012). The new Event carries a `supersedes_event_id` link to the cancelled one. Tapping the invite opens the successor's detail card with framing that this is the relocated/rescheduled version. Recipients can Commit to the successor cleanly or ignore — Cancellation is not a Flake for them, so there is no rep cost for declining. The invite expires when the successor goes Live. The mechanism is α-only (Seeders cannot cancel per ADR 0001).
+_Avoid_: re-invite, re-RSVP, follow-on event.
 
 ## App surfaces
 
@@ -132,13 +142,15 @@ Presence is resolved by **objective signals only** — the check-in tap and pass
 
 There are two paths to a confirmed Show:
 
-1. **Check-in tap** — Attendees can tap a "I'm here" prompt at any time during the Live state (from `start_time` to `end_time`). The tap is **geofence-gated** — rejected unless the user's GPS places them within ~50m of the Event's pin. The tap is anti-fraud and cheap (one location query, no background polling).
+1. **Check-in tap** — Attendees can tap a "I'm here" prompt at any time during the Live state (from `start_time` to `end_time`). The tap is **geofence-gated** with accuracy-awareness — accepted when `distance_to_pin - horizontalAccuracy <= 50m` (i.e., the user's reported uncertainty circle overlaps the 50m geofence). A confident outdoor fix at 60m is rejected; an indoor fix at 100m with ±80m reported accuracy is accepted. This biases toward false-positives where iOS admits its fix is uncertain (indoor / urban canyon) while preserving the 50m anti-fraud floor where the fix is confident. See ADR 0011. The tap is cheap (one location query, no background polling).
 
    A push + in-app banner reminder fires once at Live time (i.e., at `start_time`) to nudge Attendees who haven't yet checked in. The reminder is a nudge, not a gate — the tap affordance is always available during Live with or without the reminder having fired. For α-Events with `start_time = creation_time` (immediate-Live), the reminder fires alongside Commit confirmations rather than as a scheduled push.
 
 2. **Passive location confirmation** — for users who granted iOS "Always Allow" location permission, the app passively checks whether at least one GPS sample places them within the Event's wider passive-presence radius (~150m) at any point during the event window (15 minutes before scheduled start through scheduled end). Any single sample inside the polygon during the window is sufficient. If they enter then leave during the event, that still counts as Show — leaving early is acceptable in v0.
 
 Either path produces a Show. If neither produces presence confirmation **and** the Attendee did not Withdraw, it's a Ghost. There is no "Soft Ghost" disposition — the previous distinction depended on peer attestation, which is no longer used to determine presence.
+
+Either path also fires a single subtle system message into the Event chat on first confirmation ("Sam is here" or similar — styled as a system event, not a user message). The message text is **identical** regardless of source (tap vs passive); the source is not surfaced to other Attendees, since differentiated text would leak permission state.
 
 The wider passive radius (150m vs the tap's 50m) is intentional: the tap is anti-fraud (you could spoof presence by tapping if it were too loose), while passive GPS confirmation is harder to fake (background reading from iOS) so we lean toward catching real attendees through GPS noise rather than missing them.
 
@@ -154,7 +166,7 @@ If the user declines the upgrade at step 2, they fall back to check-in-tap-only 
 
 ## Post-event experience
 
-Within ~30 minutes of an Event going Done, the user is prompted to rate their experience (Host rating on α; event rating + optional Attendee flags on β). After rating, they're shown fellow Attendees as cards with one-tap **Friend-request** — converting strangers into Friends is the network-effect engine of the product, and the post-event window is the highest-yield moment for that conversion. Optional photo upload to the read-only chat is allowed during the 24hr afterglow window. No share-to-social, streaks, or badges in v0.
+Within ~30 minutes of an Event going Done, the user is prompted to rate their experience (Host rating on α; event rating + optional Attendee flags on β). After rating, they're shown fellow Attendees as cards with one-tap **Friend-request** — converting strangers into Friends is the network-effect engine of the product, and the post-event window is the highest-yield moment for that conversion. Optional photo upload is allowed during the 24hr afterglow window; uploads in flight at the 24hr cut are allowed to complete and land in the now-archived chat, but no new uploads are accepted after the cut. The feedback flow itself closes 24hr after Done — same window as the chat archive cut; signals submitted after that are discarded. No share-to-social, streaks, or badges in v0.
 
 Friend-adds are deliberately **post-event, not in-event** — pulling out a phone mid-event to friend someone breaks presence; the next-morning "I had fun, let me lock that in" moment is the right prompt.
 
@@ -162,7 +174,7 @@ Friend-adds are deliberately **post-event, not in-event** — pulling out a phon
 
 Three buckets:
 
-**Required (cannot disable):** Reminders and state changes for Events the user has Committed to (starts-soon, Live time, **Tip** on β-Events — the moment intent becomes a binding plan, Host-cancellation, removal). Account-critical alerts (rep changes affecting capabilities, flags, security).
+**Required (cannot disable):** Reminders and state changes for Events the user has Committed to (starts-soon, Live time, **Tip** on β-Events — the moment intent becomes a binding plan, Host-cancellation, removal, **title/description edits**, **recommit invite** when a Committed Event was cancelled-and-recreated). Account-critical alerts (rep changes affecting capabilities, flags, security).
 
 **Default ON, opt-out:** Non-Tip threshold milestones on Committed Events (slot opened, count milestones). Direct messages from Friends. Friend-Attending-nearby (smart-throttled to avoid spam in dense friend graphs).
 
