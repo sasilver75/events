@@ -340,7 +340,7 @@ These are unresolved at PRD stage. Each will be addressed in the technical desig
 2. **Reputation score computation** — input weights, score range, recompute cadence.
 3. **Capability gating thresholds** — what reputation level enables hosting, what triggers Restricted state.
 4. **Cold-start launch strategy** — single LA neighborhood vs. citywide, seeded "anchor" Events run by the team or partners.
-5. **Web vs. native platform** — native is implied by the location/notification/camera-heavy posture, but warrants explicit decision.
+5. ~~**Web vs. native platform.**~~ Resolved: iOS-first native (Swift/SwiftUI), Android deferred (per ADR 0003). Driven by the location/notification/camera-heavy posture and the Apple-native liveness path in ADR 0007.
 6. **Specific 10-tooltip tutorial copy + pre-signup demo content.**
 7. ~~**Geofence radius for check-in.**~~ Resolved: accuracy-aware tap (per ADR 0011) — accepted when `distance_to_pin - horizontalAccuracy <= 50m`. Tap-rejection telemetry by category remains valuable for tuning the 50m floor itself.
 8. ~~**Whether check-in unlocks any Live-only chat affordances.**~~ Resolved: first presence confirmation (tap or passive) fires a single subtle system message into the chat; message text is identical regardless of source. No live-emoji, no presence dots, no "I'm by the entrance" affordance in v0.

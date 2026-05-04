@@ -22,9 +22,13 @@ Self-hosting on R2 is essentially free at v0 scale (one static file, zero egress
 - **Apple MapKit.** Free, integrated, no MAU bill. Rejected: custom cartography is too constrained — we cannot achieve a brand-distinct look, and the wedge depends on the look.
 - **Google Maps SDK.** Capable but Google's visual language permeates and theming is more constrained than Mapbox or MapLibre. Also association cost — the product is positioned against Google's "places" model.
 
+## Wave-1 deferral: hosted tiles before self-hosting
+
+The commitment in this ADR is to the *primitive* (MapLibre Native + Protomaps tiles), not to self-hosting from day one. Wave 1 of the v0 build uses **Protomaps' free hosted tier** so map rendering is on the critical path without dragging in `.pmtiles` extraction, R2 setup, or style fork work. Self-hosting on Cloudflare R2 is gated behind a Wave-2 issue ("stand up self-hosted Protomaps tiles") and should land before any custom cartography styling work begins. Until then, prod and dev both read from the hosted tier.
+
 ## Consequences
 
-- "MapLibre Native" is the C++ engine with Swift bindings (Metal-backed) — not a JS bridge. The name is historical, distinguishing it from MapLibre GL JS.
+- "MapLibre Native" is the C++ engine with Swift bindings (Metal-backed) — not a JavaScript bridge. The name is historical, distinguishing it from MapLibre GL JS.
 - We commit to ~1–2 weeks of part-time style fiddling on a Protomaps Basemaps fork to reach an on-brand look. Acceptable bar is "quiet, readable, on-brand color" — not "great cartography." The pin treatment carries the playful weight.
 - Tile pipeline ops surface: regenerate the `.pmtiles` extract from OSM data periodically (monthly cadence is fine). One command, but a real ongoing task.
 - We deliberately avoid Mapbox-proprietary style features and Mapbox's directions/geocoding/search APIs to keep migration to (or from) Mapbox a real option.
