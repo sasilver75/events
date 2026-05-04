@@ -1,5 +1,8 @@
 # Attendance is resolved by geofence-gated check-in, not peer attestation
 
+> **Status:** Superseded by [ADR 0009](./0009-presence-objective-signals-only.md). The principle (no peer attestation for presence) was right; the disposition matrix below quietly violated it by using peer flags to disambiguate Show vs Ghost. ADR 0009 holds the principle correctly.
+
+
 The platform resolves "did this Attendee Show or Ghost?" using **GPS-gated self-check-in** combined with **post-event peer flags from ratings**, not by asking Hosts or peers to directly attest who was physically present. Check-in taps are rejected unless the user's location places them within a small radius (~50m) of the Event pin at tap time.
 
 ## Why

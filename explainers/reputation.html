@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reputation v0 — Spontaneous Events</title>
+<style>
+  :root {
+    --bg: #faf8f4;
+    --paper: #ffffff;
+    --ink: #1a1a1a;
+    --muted: #6b6b6b;
+    --line: #e5e1d8;
+    --accent: #d96644;
+    --accent-soft: #f5dccc;
+    --good: #4a8a5e;
+    --bad: #b94a3c;
+    --warn: #c89a3d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.55;
+    font-size: 16px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 56px 32px 96px; }
+  header { margin-bottom: 48px; }
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  h1 {
+    font-size: 44px;
+    line-height: 1.1;
+    margin: 8px 0 16px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  h2 {
+    font-size: 24px;
+    margin: 0 0 16px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    font-size: 15px;
+    margin: 0 0 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+  .lede { color: var(--muted); font-size: 18px; max-width: 720px; }
+
+  .formula {
+    background: var(--ink);
+    color: #fff;
+    border-radius: 14px;
+    padding: 32px 28px;
+    margin: 0 0 56px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 15px;
+    line-height: 1.7;
+    overflow-x: auto;
+    white-space: pre;
+    tab-size: 2;
+  }
+  .formula .c { color: #6b6b6b; }
+  .formula .k { color: #f3a06b; }
+  .formula .n { color: #b8d6a3; }
+  .formula .accent { color: #d96644; font-weight: 700; }
+
+  .grid { display: grid; gap: 24px; }
+  .grid.two { grid-template-columns: 1fr 1fr; }
+  .grid.three { grid-template-columns: 1fr 1fr 1fr; }
+  @media (max-width: 800px) {
+    .grid.two, .grid.three { grid-template-columns: 1fr; }
+    h1 { font-size: 32px; }
+    .wrap { padding: 32px 20px; }
+  }
+
+  .card {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 24px;
+  }
+  .card.flat { background: transparent; border: 1px dashed var(--line); }
+
+  section { margin-bottom: 64px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.08em; }
+  td.num { font-family: "SF Mono", Menlo, monospace; text-align: right; }
+
+  .persona {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .persona .label { font-weight: 700; font-size: 15px; }
+  .persona .meta { font-size: 13px; color: var(--muted); }
+  .score-pill {
+    display: inline-flex; align-items: baseline;
+    background: var(--accent-soft);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-weight: 700;
+    font-size: 22px;
+    align-self: flex-start;
+    color: var(--ink);
+    font-family: "SF Mono", Menlo, monospace;
+  }
+  .score-pill .small { font-size: 12px; color: var(--muted); margin-left: 4px; }
+
+  .controls { display: grid; grid-template-columns: auto 1fr auto; gap: 14px 18px; align-items: center; }
+  .controls label { font-weight: 600; font-size: 14px; }
+  .controls input[type=range] { width: 100%; accent-color: var(--accent); }
+  .controls .val {
+    font-family: "SF Mono", Menlo, monospace;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 4px 10px;
+    min-width: 60px;
+    text-align: center;
+    font-size: 14px;
+  }
+
+  .live-score {
+    margin-top: 24px;
+    padding: 22px 24px;
+    background: linear-gradient(135deg, var(--ink), #2c2c2c);
+    border-radius: 12px;
+    color: #fff;
+    display: flex; align-items: center; gap: 24px; justify-content: space-between;
+    flex-wrap: wrap;
+  }
+  .live-score .big {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 56px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .live-score .breakdown {
+    font-size: 13px; color: #c8c8c8;
+    font-family: "SF Mono", Menlo, monospace;
+  }
+  .live-score .breakdown b { color: #fff; font-weight: 600; }
+
+  svg.chart { width: 100%; height: auto; display: block; }
+
+  .legend { display: flex; gap: 16px; font-size: 13px; color: var(--muted); margin-top: 8px; flex-wrap: wrap; }
+  .legend .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: middle; }
+
+  .pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    color: var(--muted);
+  }
+  .pill.good { background: #e7f1eb; border-color: #cde5d6; color: var(--good); }
+  .pill.bad { background: #fbeae7; border-color: #f3cdc6; color: var(--bad); }
+  .pill.warn { background: #fbf2db; border-color: #f0e1b3; color: #8a6a1f; }
+
+  .note {
+    font-size: 14px;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+  .note b { color: var(--ink); }
+  ul { padding-left: 20px; }
+  li { margin: 6px 0; }
+  code { font-family: "SF Mono", Menlo, monospace; background: var(--bg); padding: 1px 6px; border-radius: 4px; font-size: 13px; }
+
+  dl.glossary { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 10px 22px; }
+  dl.glossary dt {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 600;
+    padding-top: 1px;
+    white-space: nowrap;
+  }
+  dl.glossary dd { margin: 0; font-size: 14px; color: var(--ink); }
+  dl.glossary dd .sub { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Spontaneous Events · v0</div>
+    <h1>Reputation, in two inputs.</h1>
+    <p class="lede">Did you show up? Did anyone name a real concern? That's it. Everything else (👍s, soft 👎s, ratings) is captured for bundled feedback to the user but doesn't move the score.</p>
+  </header>
+
+  <section>
+    <div class="formula">
+<span class="c"># Final score, 0–100</span>
+score = clamp(round(<span class="accent">behavioral</span> * <span class="accent">flag_factor</span>), 0, 100)
+
+<span class="c"># Behavioral — Bayesian Bernoulli, severity-weighted, time-decayed</span>
+posterior_α = <span class="n">4.0</span> + Σ (e.success_weight * decay(e.age_days))
+posterior_β = <span class="n">1.0</span> + Σ (e.failure_weight * decay(e.age_days))
+<span class="accent">behavioral</span>  = (posterior_α / (posterior_α + posterior_β)) * 100
+
+<span class="c"># Flag factor — multiplicative penalty, decayed counts</span>
+weighted_flags = Σ decay(flag.age_days)
+<span class="accent">flag_factor</span> = max(<span class="n">0.4</span>, <span class="n">1</span> - <span class="n">0.12</span> * weighted_flags)
+
+<span class="c"># Decay — exponential, 2-year half-life</span>
+decay(age_days) = <span class="n">0.5</span> ** (age_days / <span class="n">730</span>)
+    </div>
+
+    <div class="card" style="margin-top: 0">
+      <h3>Variables in the formula</h3>
+      <dl class="glossary">
+        <dt>score</dt>
+        <dd>Final reputation, integer 0–100. What gets stored on the user row and shown in the UI.</dd>
+
+        <dt>behavioral</dt>
+        <dd>The "did they show up reliably?" component. Float 0–100, derived from a Bayesian Bernoulli over a user's event outcomes (Shows, Ghosts, Flakes), severity-weighted and time-decayed.</dd>
+
+        <dt>flag_factor</dt>
+        <dd>The "did anyone name a real concern?" multiplier. Float in [0.4, 1.0]. Multiplies <code>behavioral</code> down — never up.</dd>
+
+        <dt>posterior_α</dt>
+        <dd>Bayesian "successes" count: the prior (4.0) plus all decay-weighted event successes a user has accrued.</dd>
+
+        <dt>posterior_β</dt>
+        <dd>Bayesian "failures" count: the prior (1.0) plus all decay-weighted event failures. The prior makes new users start at ~80, drifting toward their true rate as evidence accrues.</dd>
+
+        <dt>e</dt>
+        <dd>A single past event the user Committed to. Iterated over to build the posterior.</dd>
+
+        <dt>e.success_weight</dt>
+        <dd>How much this event contributes to "successes" — depends on outcome (see <i>Event outcomes</i> below).</dd>
+
+        <dt>e.failure_weight</dt>
+        <dd>How much this event contributes to "failures" — same source. Severity is encoded here (Ghost weighs 3× a Flake's 1.5×).</dd>
+
+        <dt>e.age_days</dt>
+        <dd>How long ago the event happened. Feeds <code>decay()</code>.</dd>
+
+        <dt>weighted_flags</dt>
+        <dd>Sum of all flags this user has received, each multiplied by its own decay factor. Old flags weigh less.</dd>
+
+        <dt>flag.age_days</dt>
+        <dd>How long ago a given flag was received.</dd>
+
+        <dt>decay(age_days)</dt>
+        <dd>Exponential time-decay function with a 2-year half-life. <code>0.5 ** (age_days / 730)</code> — at 0d = 1.0, at 730d = 0.5, at 1460d = 0.25.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <h2>Try it</h2>
+    <div class="card">
+      <div class="controls">
+        <label for="show">Shows</label>
+        <input type="range" id="show" min="0" max="40" value="10">
+        <div class="val" id="showVal">10</div>
+
+        <label for="ghost">Ghosts</label>
+        <input type="range" id="ghost" min="0" max="20" value="0">
+        <div class="val" id="ghostVal">0</div>
+
+        <label for="flake">Flakes</label>
+        <input type="range" id="flake" min="0" max="20" value="0">
+        <div class="val" id="flakeVal">0</div>
+
+        <label for="flags">Recent flags</label>
+        <input type="range" id="flags" min="0" max="10" value="0">
+        <div class="val" id="flagsVal">0</div>
+
+        <label for="age">Avg event age (days)</label>
+        <input type="range" id="age" min="0" max="2000" value="60">
+        <div class="val" id="ageVal">60</div>
+      </div>
+
+      <div class="live-score">
+        <div>
+          <h3 style="color:#aaa; margin:0 0 4px">Computed score</h3>
+          <div class="big" id="score">—</div>
+        </div>
+        <div class="breakdown">
+          behavioral: <b id="b">—</b><br>
+          flag_factor: <b id="ff">—</b><br>
+          weighted_flags: <b id="wf">—</b><br>
+          posterior_α: <b id="pa">—</b>, posterior_β: <b id="pb">—</b>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Event outcomes</h2>
+    <div class="card">
+      <p class="note" style="margin-top: 0">Every event a user Committed to ends in exactly one of these outcomes. Show vs Ghost is determined by <b>objective signals only</b> — check-in tap or passive location confirmation. No peer attestation enters the presence decision (per ADR 0009).</p>
+      <dl class="glossary">
+        <dt>Show</dt>
+        <dd>Presence confirmed by either a check-in tap (geofence-gated, ~50m of the pin) or passive location confirmation (any GPS sample within ~150m of the pin during the event window — requires "Always Allow" location permission).</dd>
+
+        <dt>Ghost</dt>
+        <dd>No Withdraw, no check-in, no passive location confirmation. The strongest behavioral negative.</dd>
+
+        <dt>Flake</dt>
+        <dd>The user Withdrew, but inside the "late" window (post-Tip on β-Events; &lt;2hr from Live on either shape). Costly-but-honest.</dd>
+
+        <dt>Early Withdraw</dt>
+        <dd>The user Withdrew outside the late window. Clean — does not count against the score at all.</dd>
+
+        <dt>Flag</dt>
+        <dd>A 👎 with at least one "hard reason" selected (e.g., "concerning behavior," "would not attend with again"). Orthogonal to Show/Ghost — flags never determine presence; they only drive <code>flag_factor</code>. Invalidated if location data demonstrably places the flagged user elsewhere during the event window.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <h2>Why Bayesian smoothing?</h2>
+    <div class="card">
+      <h3>The cold-start problem</h3>
+      <p class="note" style="margin-top: 0">The naive formula is <code>score = shows / total_events × 100</code>. Simple, but broken at low data. A new user with 1 event who Ghosts is at 0/1 = <b>0%</b> — indistinguishable from a chronic ghoster with 100 events and 100 ghosts. That's wrong: we have 1 data point, not 100. We don't <i>know</i> anything about them yet.</p>
+
+      <h3 style="margin-top: 22px">The prior as "phantom events"</h3>
+      <p class="note" style="margin-top: 0">Bayesian Bernoulli baked a starting belief into the math, expressed as <i>imaginary events every user starts with</i>:</p>
+      <p class="note"><code>α=4, β=1</code> means "before we've seen anything from this user, we believe they behave like someone who has Shown up 4 times and failed 1 time." That puts them at ~80% expected reliability — the "New" baseline.</p>
+      <p class="note">Each real event nudges that belief toward the user's true rate. The math (Beta-Bernoulli posterior mean):</p>
+      <div class="formula" style="font-size: 14px; padding: 16px 20px; margin: 8px 0 4px">
+posterior_mean = (α_prior + successes) / (α_prior + successes + β_prior + failures)
+      </div>
+
+      <h3 style="margin-top: 22px">Why "severity-weighted"?</h3>
+      <p class="note" style="margin-top: 0">Pure Bernoulli treats all failures equally — a Ghost would weigh the same as a Flake. We don't want that; a Ghost is structurally worse. So each outcome contributes a <i>weighted</i> amount to α (successes) and β (failures), with severity encoded directly in those weight values. It's no longer strictly Bernoulli (it's a generalization), but the posterior-mean intuition still holds: more weight in either column shifts the score correspondingly.</p>
+
+      <table style="margin-top: 14px">
+        <thead><tr><th>Outcome</th><th>Adds to α (success)</th><th>Adds to β (failure)</th></tr></thead>
+        <tbody>
+          <tr><td><span class="pill good">Show</span></td><td class="num">1.0</td><td class="num">0.0</td></tr>
+          <tr><td><span class="pill bad">Flake</span></td><td class="num">0.0</td><td class="num">1.5</td></tr>
+          <tr><td><span class="pill bad">Ghost</span></td><td class="num">0.0</td><td class="num">3.0</td></tr>
+          <tr><td><span class="pill">Early Withdraw</span></td><td class="num">0.0</td><td class="num">0.0</td></tr>
+        </tbody>
+      </table>
+      <p class="note" style="margin-top: 8px">A Ghost contributes 3× a Flake's failure weight. Early Withdraw is invisible to the score.</p>
+
+      <h3 style="margin-top: 22px">Walk-through</h3>
+      <p class="note" style="margin-top: 0">Plugging the severity weights from above into the posterior formula. <code>α</code> = prior 4 + Σ success_weights · <code>β</code> = prior 1 + Σ failure_weights · score = α / (α + β) × 100.</p>
+      <table style="margin-top: 4px">
+        <thead><tr><th>Scenario</th><th>α</th><th>β</th><th class="num">Score</th></tr></thead>
+        <tbody>
+          <tr><td>Brand-new user, no events</td><td class="num">4</td><td class="num">1</td><td class="num">80</td></tr>
+          <tr><td>1 Ghost (failure weight 3.0)</td><td class="num">4</td><td class="num">1 + 3 = 4</td><td class="num">50</td></tr>
+          <tr><td>1 Ghost, then 5 Shows (success weight 1.0 each)</td><td class="num">4 + 5 = 9</td><td class="num">4</td><td class="num">69</td></tr>
+          <tr><td>1 Ghost, then 20 Shows</td><td class="num">4 + 20 = 24</td><td class="num">4</td><td class="num">86</td></tr>
+          <tr><td>50 Ghosts, no Shows (50 × 3.0 = 150 to β)</td><td class="num">4</td><td class="num">1 + 150 = 151</td><td class="num">3</td></tr>
+        </tbody>
+      </table>
+      <p class="note" style="margin-top: 12px">Two things to notice: (1) one bad event doesn't tank a new user — the prior buffers them. (2) With enough real events, the prior becomes irrelevant — reality dominates.</p>
+
+      <h3 style="margin-top: 22px">Two payoffs</h3>
+      <ul>
+        <li><b>Cold-start sanity.</b> New users don't get punished for tiny sample sizes; ratings move smoothly from "what we'd assume of anyone" toward "what their record shows."</li>
+        <li><b>Confidence baked into the math.</b> With more events, the prior fades and individual events have less swing. A reliable user with 50 Shows isn't tanked by one bad night.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Flag factor</h2>
+    <div class="card">
+      <h3>Multiplicative penalty</h3>
+        <p class="note">Flags scale your score down — they don't just chip away at it. Floor at 0.4 bounds the worst case (e.g., coordinated harassment).</p>
+      <svg class="chart" viewBox="0 0 400 220" id="flagChart"></svg>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--accent)"></span>flag_factor as flag count grows</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Decay — 2-year half-life</h2>
+    <div class="card">
+      <p class="note" style="margin-top:0">A flag (or behavioral event) from <b>1 year ago</b> counts at <b>~71%</b>; from <b>2 years</b> at <b>50%</b>; from <b>4 years</b> at <b>25%</b>. No hard cutoff. Old behavior fades; very old behavior is nearly gone but never truly zero.</p>
+      <svg class="chart" viewBox="0 0 800 280" id="decayChart"></svg>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--accent)"></span>weight = 0.5 ^ (age_days / 730)</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Personas</h2>
+    <div class="grid three" id="personas"></div>
+  </section>
+
+  <section>
+    <h2>What does <em>not</em> enter the score</h2>
+    <div class="card flat">
+      <ul>
+        <li><b>👍 thumbs-up</b> — captured. Shown to the user in their bundled feedback ("3 people gave you 👍 from your last events"). Doesn't move the score.</li>
+        <li><b>👎 with "I just didn't like them"</b> — captured. Shown to the user as soft signal. Doesn't move the score.</li>
+        <li><b>1–5 numeric ratings</b> — not in v0. The ternary 👍/👎/skip pattern replaces them.</li>
+      </ul>
+      <p class="note">Score = trustworthiness, not popularity. Whether you charmed everyone is orthogonal. Did you show up? Did anyone name a real concern?</p>
+    </div>
+  </section>
+
+</div>
+
+<script>
+// ---------- Live calculator ----------
+const E = id => document.getElementById(id);
+const HALF = 730;
+const decay = d => Math.pow(0.5, d / HALF);
+
+function compute() {
+  const show = +E('show').value;
+  const ghost = +E('ghost').value;
+  const flake = +E('flake').value;
+  const flags = +E('flags').value;
+  const age = +E('age').value;
+  E('showVal').textContent = show;
+  E('ghostVal').textContent = ghost;
+  E('flakeVal').textContent = flake;
+  E('flagsVal').textContent = flags;
+  E('ageVal').textContent = age;
+
+  const w = decay(age);
+  let succ = show * 1.0;
+  let fail = ghost * 3.0 + flake * 1.5;
+  succ *= w;
+  fail *= w;
+  const a = 4.0 + succ;
+  const b = 1.0 + fail;
+  const behavioral = a / (a + b) * 100;
+
+  const wflags = flags * w;
+  const ff = Math.max(0.4, 1 - 0.12 * wflags);
+
+  const score = Math.max(0, Math.min(100, Math.round(behavioral * ff)));
+
+  E('score').textContent = score;
+  E('b').textContent = behavioral.toFixed(1);
+  E('ff').textContent = ff.toFixed(3);
+  E('wf').textContent = wflags.toFixed(2);
+  E('pa').textContent = a.toFixed(2);
+  E('pb').textContent = b.toFixed(2);
+}
+['show','ghost','flake','flags','age'].forEach(id => E(id).addEventListener('input', compute));
+compute();
+
+// ---------- Flag factor chart ----------
+(function() {
+  const svg = E('flagChart');
+  const W = 400, H = 220, PAD = 40;
+  const xMax = 8;
+  const sx = n => PAD + (n / xMax) * (W - PAD - 16);
+  const sy = v => H - PAD - ((v - 0.3) / 0.8) * (H - PAD - 16);
+
+  // axes
+  let html = '';
+  html += `<line x1="${PAD}" y1="${H-PAD}" x2="${W-8}" y2="${H-PAD}" stroke="#ccc"/>`;
+  html += `<line x1="${PAD}" y1="${H-PAD}" x2="${PAD}" y2="8" stroke="#ccc"/>`;
+  for (let i = 0; i <= 8; i++) {
+    html += `<line x1="${sx(i)}" y1="${H-PAD}" x2="${sx(i)}" y2="${H-PAD+4}" stroke="#999"/>`;
+    html += `<text x="${sx(i)}" y="${H-PAD+18}" font-size="11" text-anchor="middle" fill="#666">${i}</text>`;
+  }
+  for (let v = 0.4; v <= 1.01; v += 0.2) {
+    const y = sy(v);
+    html += `<line x1="${PAD-4}" y1="${y}" x2="${W-8}" y2="${y}" stroke="#eee"/>`;
+    html += `<text x="${PAD-8}" y="${y+4}" font-size="11" text-anchor="end" fill="#666">${v.toFixed(1)}</text>`;
+  }
+  // floor line
+  html += `<line x1="${PAD}" y1="${sy(0.4)}" x2="${W-8}" y2="${sy(0.4)}" stroke="#b94a3c" stroke-dasharray="3,3" opacity="0.5"/>`;
+  html += `<text x="${W-12}" y="${sy(0.4)-6}" font-size="11" text-anchor="end" fill="#b94a3c">floor 0.4</text>`;
+
+  // curve
+  let path = '';
+  for (let i = 0; i <= xMax * 10; i++) {
+    const f = i / 10;
+    const v = Math.max(0.4, 1 - 0.12 * f);
+    path += (i === 0 ? 'M' : 'L') + sx(f) + ',' + sy(v);
+  }
+  html += `<path d="${path}" stroke="#d96644" stroke-width="2.5" fill="none"/>`;
+  // axis labels
+  html += `<text x="${W/2}" y="${H-6}" font-size="12" text-anchor="middle" fill="#666">flag count (decayed)</text>`;
+  html += `<text x="14" y="${H/2}" font-size="12" text-anchor="middle" fill="#666" transform="rotate(-90 14 ${H/2})">flag_factor</text>`;
+  svg.innerHTML = html;
+})();
+
+// ---------- Decay chart ----------
+(function() {
+  const svg = E('decayChart');
+  const W = 800, H = 280, PAD_L = 50, PAD_B = 40;
+  const xMaxDays = 6 * 365; // 6 years
+  const sx = d => PAD_L + (d / xMaxDays) * (W - PAD_L - 16);
+  const sy = v => H - PAD_B - v * (H - PAD_B - 16);
+
+  let html = '';
+  html += `<line x1="${PAD_L}" y1="${H-PAD_B}" x2="${W-8}" y2="${H-PAD_B}" stroke="#ccc"/>`;
+  html += `<line x1="${PAD_L}" y1="${H-PAD_B}" x2="${PAD_L}" y2="8" stroke="#ccc"/>`;
+  // x ticks: years
+  for (let yr = 0; yr <= 6; yr++) {
+    const d = yr * 365;
+    const x = sx(d);
+    html += `<line x1="${x}" y1="${H-PAD_B}" x2="${x}" y2="${H-PAD_B+4}" stroke="#999"/>`;
+    html += `<text x="${x}" y="${H-PAD_B+20}" font-size="12" text-anchor="middle" fill="#666">${yr}y</text>`;
+  }
+  for (let v = 0; v <= 1.01; v += 0.25) {
+    const y = sy(v);
+    html += `<line x1="${PAD_L-4}" y1="${y}" x2="${W-8}" y2="${y}" stroke="#eee"/>`;
+    html += `<text x="${PAD_L-8}" y="${y+4}" font-size="12" text-anchor="end" fill="#666">${v.toFixed(2)}</text>`;
+  }
+  // half-life marker
+  const xHL = sx(730);
+  html += `<line x1="${xHL}" y1="${sy(0.5)}" x2="${xHL}" y2="${H-PAD_B}" stroke="#d96644" stroke-dasharray="3,3" opacity="0.6"/>`;
+  html += `<line x1="${PAD_L}" y1="${sy(0.5)}" x2="${xHL}" y2="${sy(0.5)}" stroke="#d96644" stroke-dasharray="3,3" opacity="0.6"/>`;
+  html += `<text x="${xHL+6}" y="${sy(0.5)-6}" font-size="12" fill="#d96644" font-weight="600">half-life · 2y</text>`;
+
+  // curve
+  let path = '';
+  for (let i = 0; i <= 240; i++) {
+    const d = (i / 240) * xMaxDays;
+    const v = Math.pow(0.5, d / 730);
+    path += (i === 0 ? 'M' : 'L') + sx(d) + ',' + sy(v);
+  }
+  html += `<path d="${path}" stroke="#d96644" stroke-width="2.5" fill="none"/>`;
+  html += `<text x="${W/2}" y="${H-4}" font-size="13" text-anchor="middle" fill="#666">event age</text>`;
+  html += `<text x="14" y="${H/2}" font-size="13" text-anchor="middle" fill="#666" transform="rotate(-90 14 ${H/2})">decay weight</text>`;
+  svg.innerHTML = html;
+})();
+
+// ---------- Personas ----------
+(function() {
+  function calc({show, ghost, flake, flags, age}) {
+    const w = decay(age);
+    const a = 4 + (show * 1) * w;
+    const b = 1 + (ghost * 3 + flake * 1.5) * w;
+    const beh = a / (a + b) * 100;
+    const wf = flags * w;
+    const ff = Math.max(0.4, 1 - 0.12 * wf);
+    return { score: Math.round(beh * ff), behavioral: beh, ff };
+  }
+
+  const ps = [
+    { label: 'Reliable & Trustworthy', meta: '20 Shows · 0 Ghosts · 0 flags · last 6mo', tag: 'good',
+      params: { show: 20, ghost: 0, flake: 0, flags: 0, age: 90 } },
+    { label: 'Reliable Creep', meta: '18 Shows · 0 Ghosts · 4 flags · last 6mo', tag: 'bad',
+      params: { show: 18, ghost: 0, flake: 0, flags: 4, age: 90 } },
+    { label: 'Nice Flaker', meta: '6 Shows · 0 Ghosts · 4 Flakes · 0 flags', tag: 'warn',
+      params: { show: 6, ghost: 0, flake: 4, flags: 0, age: 90 } },
+    { label: 'Brand-New', meta: 'No events yet', tag: 'good',
+      params: { show: 0, ghost: 0, flake: 0, flags: 0, age: 0 } },
+    { label: 'Returnee — bad year, then solid', meta: '50 Shows recent · 10 Ghosts 5y ago · 0 flags', tag: 'good',
+      params: { show: 50, ghost: 10, flake: 0, flags: 0, age: 365 } },
+    { label: 'Coordinated harassment victim', meta: '15 Shows · 12 fresh flags', tag: 'bad',
+      params: { show: 15, ghost: 0, flake: 0, flags: 12, age: 30 } },
+  ];
+
+  // returnee needs special handling — different ages for different events. Approximate by averaging.
+  // For demo simplicity we show the simple one-age model and note the limitation.
+
+  const root = E('personas');
+  ps.forEach(p => {
+    const r = calc(p.params);
+    const div = document.createElement('div');
+    div.className = 'persona';
+    div.innerHTML = `
+      <div class="label">${p.label}</div>
+      <div class="meta">${p.meta}</div>
+      <div class="score-pill">${r.score}<span class="small">/100</span></div>
+      <div class="meta" style="font-family:'SF Mono',Menlo,monospace; font-size:12px">
+        behavioral ${r.behavioral.toFixed(1)} × flag_factor ${r.ff.toFixed(2)}
+      </div>
+    `;
+    root.appendChild(div);
+  });
+})();
+</script>
+</body>
+</html>
