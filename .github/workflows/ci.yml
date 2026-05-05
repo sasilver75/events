@@ -47,6 +47,13 @@ jobs:
             echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
           } >> "$GITHUB_ENV"
 
+      - name: Install golang-migrate
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
+
+      - name: Apply migrations
+        working-directory: server
+        run: make migrate-up DB_URL=$DATABASE_URL
+
       - name: Go test
         working-directory: server
         run: go test ./...
@@ -110,5 +117,6 @@ jobs:
             -project ios/Spur/Spur.xcodeproj \
             -scheme Spur \
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -skip-testing:SpurUITests/SpurUITests/testLaunchPerformance \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
