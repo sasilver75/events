@@ -35,3 +35,21 @@ Commit, Withdraw, create event, check-in, rate, friend — goes through a Go
 HTTP server that talks to Supabase Postgres via `pgx`. Business logic lives
 in Go; PL/pgSQL is reserved for mechanical concerns. See
 [ADR 0005](./docs/adr/0005-supabase-data-plane-go-server-business-logic.md).
+
+## Local development
+
+The local stack is the Supabase CLI running Postgres + Auth + Storage +
+Realtime + Studio in Docker. One command boots everything.
+
+```sh
+brew install supabase/tap/supabase   # one-time
+supabase start                       # boot the stack
+./scripts/check-supabase-connection.sh
+```
+
+Copy `server/.env.example` to `server/.env` and fill in the values that
+`supabase start` prints. `.env` is gitignored.
+
+Full walkthrough — including Docker prerequisites, day-to-day commands, and
+how migrations promote from local → staging → production — lives in
+[`server/README.md`](./server/README.md#local-development).
