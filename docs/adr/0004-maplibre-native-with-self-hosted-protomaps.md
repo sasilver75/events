@@ -1,6 +1,6 @@
 # MapLibre Native + self-hosted Protomaps tiles for the map layer
 
-**Status:** Accepted. The "Wave-1 deferral: hosted tiles before self-hosting" section below is **superseded by [ADR 0019](./0019-self-hosted-pmtiles-cloudflare-worker.md)** as of 2026-05-04 — v0 self-hosts from day one. The rest of this ADR (MapLibre Native + Protomaps + R2 primitives) stands.
+**Status:** Accepted. The "Wave-1 deferral: hosted tiles before self-hosting" section below is **superseded by [ADR 0021](./0021-self-hosted-pmtiles-cloudflare-worker.md)** as of 2026-05-04 — v0 self-hosts from day one. The rest of this ADR (MapLibre Native + Protomaps + R2 primitives) stands.
 
 v0 uses **MapLibre Native** (Metal renderer, Swift bindings) as the iOS map SDK, with a forked **Protomaps Basemaps** style for cartography and a self-hosted **`.pmtiles`** file on Cloudflare R2 as the tile source. Mapbox Maps SDK, Apple MapKit, and Google Maps SDK are rejected for v0.
 

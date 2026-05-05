@@ -2,7 +2,7 @@
 
 **Status:** Accepted (2026-05-04).
 
-The v0 iOS app is a single Xcode project at `/ios/` with no local Swift Package Manager (SPM) packages, MapLibre Native added via SPM and pointed at the Cloudflare Worker tile URL from [ADR 0019](./0019-self-hosted-pmtiles-cloudflare-worker.md), a minimum deployment target of **iOS 26.0**, and a plain Model-View (MV) architecture using `@Observable` models with injected services. Multi-project workspaces, xcodegen/Tuist, premature SPM splits, MVVM ceremony, and The Composable Architecture (TCA) are all rejected for v0.
+The v0 iOS app is a single Xcode project at `/ios/` with no local Swift Package Manager (SPM) packages, MapLibre Native added via SPM and pointed at the Cloudflare Worker tile URL from [ADR 0021](./0021-self-hosted-pmtiles-cloudflare-worker.md), a minimum deployment target of **iOS 26.0**, and a plain Model-View (MV) architecture using `@Observable` models with injected services. Multi-project workspaces, xcodegen/Tuist, premature SPM splits, MVVM ceremony, and The Composable Architecture (TCA) are all rejected for v0.
 
 ## Why
 
@@ -27,11 +27,11 @@ None of these are true at v0. The "obvious" candidates (`APIClient`, `DesignSyst
 
 A watch companion is the most likely future trigger because watch extensions cannot link to the main app target — they need a shared package. That's a known but distant possibility per ADR 0003 (iOS-first, Android deferred); we extract the shared layer when that work begins, not before.
 
-### 3. MapLibre Native via SPM, tile source per ADR 0019
+### 3. MapLibre Native via SPM, tile source per ADR 0021
 
 MapLibre Native is added through Swift Package Manager, pinned to a specific version tag (not `main`). The official package ships a precompiled `MapLibre.xcframework`. CocoaPods, Carthage, and manual binary vendoring are rejected — SPM is the modern default and integrates with Xcode without extra tooling.
 
-The tile source is the Cloudflare Worker URL defined in ADR 0019 (self-hosted PMTiles in front of R2). The iOS client sees a vanilla XYZ tile source and holds no upstream API key. The full reasoning for that pipeline — request-shape adaptation, edge caching, cost — lives in ADR 0019.
+The tile source is the Cloudflare Worker URL defined in ADR 0021 (self-hosted PMTiles in front of R2). The iOS client sees a vanilla XYZ tile source and holds no upstream API key. The full reasoning for that pipeline — request-shape adaptation, edge caching, cost — lives in ADR 0021.
 
 The SwiftUI bridge is a thin `UIViewRepresentable` wrapper around `MLNMapView`. MapLibre Native is UIKit-based (the name is historical, distinguishing it from MapLibre GL JS — the Metal-backed Swift bindings are what runs on iOS). The wrapper is roughly 30 lines and lives in the main app target, not a package.
 
@@ -77,7 +77,7 @@ Captured inline in each section above to keep the rejected options next to the c
 - xcodegen / Tuist — deferred, revisit on second contributor.
 - Local SPM split for `APIClient` / `DesignSystem` — deferred, revisit on second consumer or compile-time pain.
 - Mapbox / Apple MapKit / Google Maps SDK — already rejected by ADR 0004.
-- Direct iOS PMTiles plugin — already rejected by ADR 0019.
+- Direct iOS PMTiles plugin — already rejected by ADR 0021.
 - iOS 17 / iOS 18 floors — rejected because iOS 26 contains product-relevant APIs (`FoundationModels`, `DeclaredAgeRange`).
 - MVVM, TCA — rejected for v0; TCA migration door remains open per-feature.
 
@@ -85,7 +85,7 @@ Captured inline in each section above to keep the rejected options next to the c
 
 - [ADR 0003](./0003-ios-first-native.md) — iOS-first native, premium-positioning posture that justifies the iOS 26 cohort cost.
 - [ADR 0004](./0004-maplibre-native-with-self-hosted-protomaps.md) — MapLibre Native + Protomaps + R2 primitives.
-- [ADR 0019](./0019-self-hosted-pmtiles-cloudflare-worker.md) — tile pipeline (Cloudflare Worker in front of R2) referenced by decision 3.
+- [ADR 0021](./0021-self-hosted-pmtiles-cloudflare-worker.md) — tile pipeline (Cloudflare Worker in front of R2) referenced by decision 3.
 
 ## Consequences
 

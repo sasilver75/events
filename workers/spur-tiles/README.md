@@ -2,7 +2,7 @@
 
 Serves PMTiles vector tiles from R2 as standard XYZ HTTP requests. The
 request-shape adapter pattern from
-[ADR 0019](../../docs/adr/0019-self-hosted-pmtiles-cloudflare-worker.md):
+[ADR 0021](../../docs/adr/0021-self-hosted-pmtiles-cloudflare-worker.md):
 clients see vanilla `/tiles/{z}/{x}/{y}.mvt`, the Worker translates each
 into a range read against `base/california-20260504.pmtiles` in the
 `spur-tiles` R2 bucket.

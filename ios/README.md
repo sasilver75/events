@@ -22,7 +22,7 @@ The Xcode project uses **synchronized folder** groups (the default in Xcode 26).
 Files added under `Spur/Spur/` are auto-included in the build target — no manual
 "Add Files to project" step required.
 
-Per [ADR 0018](../docs/adr/0018-ios-bootstrap.md): single Xcode project,
+Per [ADR 0020](../docs/adr/0020-ios-bootstrap.md): single Xcode project,
 zero local Swift Package Manager (SPM) packages, plain Model-View architecture
 with `@Observable` model classes (no separate ViewModel layer).
 
@@ -31,7 +31,7 @@ with `@Observable` model classes (no separate ViewModel layer).
 - **Xcode 26.0** or later
 - **iOS 26.0** simulator runtime (download via `xcodebuild -downloadPlatform iOS`
   or Xcode → Settings → Components)
-- Minimum deployment target: **iOS 26.0** (see ADR 0018 §4 for the cohort-cost
+- Minimum deployment target: **iOS 26.0** (see ADR 0020 §4 for the cohort-cost
   reasoning — `FoundationModels` and `DeclaredAgeRange` are load-bearing)
 
 ## Run
@@ -49,12 +49,12 @@ MapLibre Native downloads.
 |---|---|---|
 | [MapLibre Native](https://github.com/maplibre/maplibre-gl-native-distribution) | `6.26.0` (exact) | Vector-tile renderer; UIKit-based, bridged to SwiftUI via `MapView.swift` |
 
-Pinned to an exact version per ADR 0018 §3 — not `main`, not a range.
+Pinned to an exact version per ADR 0020 §3 — not `main`, not a range.
 
 ## Map / tile pipeline
 
 The map renders Protomaps vector tiles served by the `spur-tiles` Cloudflare
-Worker, defined in [ADR 0019](../docs/adr/0019-self-hosted-pmtiles-cloudflare-worker.md).
+Worker, defined in [ADR 0021](../docs/adr/0021-self-hosted-pmtiles-cloudflare-worker.md).
 
 - **Tile URL** (in `MapStyleLight.json`):
   `https://spur-tiles.sasilver0051.workers.dev/tiles/{z}/{x}/{y}.mvt`
@@ -79,7 +79,7 @@ switch Team from `None` to the new team for both `Spur` and the test targets.
 ## Architecture
 
 Plain Model-View with `@Observable` model classes and injected services
-(per ADR 0018 §5). No ViewModel layer. Services (network, location, auth)
+(per ADR 0020 §5). No ViewModel layer. Services (network, location, auth)
 will be plain Swift types — `actor` for I/O-bound work, `final class`
 otherwise — injected via `Environment` or constructor.
 
