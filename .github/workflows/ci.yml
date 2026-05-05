@@ -52,7 +52,7 @@ jobs:
 
       - name: Apply migrations
         working-directory: server
-        run: make migrate-up DB_URL=$DATABASE_URL
+        run: make migrate-up DB_URL="${DATABASE_URL}?sslmode=disable"
 
       - name: Go test
         working-directory: server
