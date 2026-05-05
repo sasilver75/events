@@ -73,6 +73,10 @@ Use `/tdd` for non-trivial features: red → green → refactor.
 - **PRDs** → `/to-prd` writes them to GitHub.
 - **Branches** → one per issue. PRs target `main`.
 - **Commits** → conventional prose; WHY in the message body.
+- **Closeouts** → On every issue close, leave a comment. "Shipped per spec —
+  <commit>" when the AC was met as written; a short drift list (what diverged
+  from the spec and why) when not. The diff and commit messages don't capture
+  decisions made under pressure — the closeout comment does.
 
 ## Agent skills
 
