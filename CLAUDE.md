@@ -18,6 +18,10 @@ scale; flag deferrals with explicit "upgrade before distribution" notes. See
 - [`docs/adr/`](./docs/adr/) — hard-to-reverse + surprising + real-trade-off
   decisions. When code or specs contradict an ADR, surface it explicitly
   rather than silently override.
+- [`docs/glossary.md`](./docs/glossary.md) — external/technical terms
+  (Twilio, A2P, JWKS, ATS, etc.). Distinct from `CONTEXT.md` (product
+  domain) and ADRs (project decisions). Add an entry when you introduce
+  or encounter a term a future reader might not know.
 
 ## Architecture at a glance
 
