@@ -66,7 +66,10 @@ Use `/tdd` for non-trivial features: red → green → refactor.
 ## Working flow
 
 - **Issues** → GitHub Issues at `sasilver75/events`. `/to-issues` for vertical
-  slices, `/triage` for state-machine moves.
+  slices, `/triage` for state-machine moves. **Always triage before starting
+  work**: replace `needs-triage` with the right role label (`ready-for-agent`,
+  `ready-for-human`, `needs-info`, or `wontfix`). A closed issue must never
+  still carry `needs-triage`.
 - **PRDs** → `/to-prd` writes them to GitHub.
 - **Branches** → one per issue. PRs target `main`.
 - **Commits** → conventional prose; WHY in the message body.
