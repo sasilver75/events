@@ -23,7 +23,8 @@ import (
 //
 // Requires:
 //   - `supabase start` running locally with [auth.sms.test_otp] enabling
-//     phone "4152127777" → "123456"
+//     phone "14152127777" → "123456" (the E.164 digits-only form GoTrue
+//     derives from the iOS client's "+14152127777" input)
 //   - DATABASE_URL pointing at the local Postgres
 //   - SUPABASE_URL + SUPABASE_ANON_KEY set
 //
@@ -75,18 +76,21 @@ func TestAuthMiddlewareEndToEnd(t *testing.T) {
 		}
 	})
 
-	const testPhone = "4152127777"
+	// E.164 on the wire (`+14152127777`); GoTrue strips the `+` for both the
+	// test_otp lookup and DB storage, so `dbPhone` is the digits-only form.
+	const wirePhone = "+14152127777"
+	const dbPhone = "14152127777"
 	const testCode = "123456"
 
 	// Force the trigger path: delete any prior auth.users row for the test
 	// phone so the verify below creates a fresh user. The cascade clears
 	// public.users with it.
-	if _, err := pool.Exec(ctx, `DELETE FROM auth.users WHERE phone = $1`, testPhone); err != nil {
+	if _, err := pool.Exec(ctx, `DELETE FROM auth.users WHERE phone = $1`, dbPhone); err != nil {
 		t.Fatalf("cleanup auth.users: %v", err)
 	}
 
-	signInWithTestOTP(t, supabaseURL, anonKey, testPhone)
-	token, userID := verifyTestOTP(t, supabaseURL, anonKey, testPhone, testCode)
+	signInWithTestOTP(t, supabaseURL, anonKey, wirePhone)
+	token, userID := verifyTestOTP(t, supabaseURL, anonKey, wirePhone, testCode)
 
 	t.Run("trigger mirrored auth.users to public.users at signup", func(t *testing.T) {
 		var exists bool
@@ -132,7 +136,7 @@ func signInWithTestOTP(t *testing.T, supabaseURL, anonKey, phone string) {
 	if err != nil {
 		t.Fatalf("otp request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("otp send: HTTP %d: %s", resp.StatusCode, b)
@@ -153,7 +157,7 @@ func verifyTestOTP(t *testing.T, supabaseURL, anonKey, phone, code string) (toke
 	if err != nil {
 		t.Fatalf("verify request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("verify: HTTP %d: %s", resp.StatusCode, b)

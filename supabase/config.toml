@@ -263,7 +263,10 @@ max_frequency = "5s"
 # Supabase Auth phone path without a real SMS provider. Hosted staging gets
 # Twilio + the dashboard switch in #9 Phase 2 (HITL).
 [auth.sms.test_otp]
-4152127777 = "123456"
+# Key is the digits-only normalization GoTrue derives from the E.164 input
+# the iOS client sends (`+14152127777` → `14152127777`). The leading `1` is
+# the US country code; iOS prepends it via the country picker.
+14152127777 = "123456"
 
 # Configure logged in session timeouts.
 # [auth.sessions]

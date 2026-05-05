@@ -1,0 +1,30 @@
+// Local development config (per ADR 0014).
+//
+// TODO (Phase 3, post-Twilio): create `Staging.xcconfig` alongside this file
+// with the hosted spur-staging Supabase URL + publishable key + a real
+// LAN/server URL, then point the Release configuration at it (Xcode →
+// project → Info → Configurations → Release → Spur → Staging). Until that
+// lands, Release falls back to Local so simulator Release builds still work.
+//
+// Anon (publishable) key is committed deliberately — Supabase markets it as
+// client-safe. Service-role key never appears in any xcconfig.
+//
+// `//` is the xcconfig comment marker, so URLs use the `$()` escape between
+// the colon and the double-slash to keep the parser from eating the rest of
+// the line.
+
+SUPABASE_URL = http:/$()/127.0.0.1:54321
+SUPABASE_ANON_KEY = sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
+SERVER_URL = http:/$()/127.0.0.1:8080
+
+// Spur-Info.plist references the three values above as $(SUPABASE_URL),
+// $(SUPABASE_ANON_KEY), $(SERVER_URL) — Xcode expands them at build time.
+// (INFOPLIST_KEY_* prefix is rejected by Xcode for non-Apple-known keys, so
+// custom keys must live in a real plist file.) Spur-Info.plist also carries
+// the NSAppTransportSecurity exception, which is dict-shaped and can't be
+// expressed in xcconfig at all.
+INFOPLIST_FILE = Spur-Info.plist
+
+// iOS Simulator reaches the host via 127.0.0.1. A real device on the same
+// wifi substitutes the host's LAN IP here, but device runs are gated on the
+// paid Apple Developer account (see ios/README.md §Signing).
