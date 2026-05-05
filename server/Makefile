@@ -16,7 +16,7 @@ fmt:
 	gofmt -s -w .
 
 lint:
-	go vet ./...
+	golangci-lint run ./...
 
 migrate-up:
 	migrate -database "$(DB_URL)" -path $(MIGRATIONS_PATH) up

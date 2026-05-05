@@ -37,7 +37,7 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("connect db: %w", err)
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 
 	if err := upsertPublicSeedUser(ctx, conn, seedUserID); err != nil {
 		return fmt.Errorf("upsert public.users seed row: %w", err)
@@ -118,7 +118,7 @@ func findUserByEmail(ctx context.Context, supaURL, serviceKey, email string) (st
 	if err != nil {
 		return "", false, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return "", false, fmt.Errorf("list users: HTTP %d: %s", resp.StatusCode, body)
@@ -157,7 +157,7 @@ func createAuthUser(ctx context.Context, supaURL, serviceKey, email string) (str
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return "", fmt.Errorf("create user: HTTP %d: %s", resp.StatusCode, respBody)

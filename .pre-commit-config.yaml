@@ -17,6 +17,13 @@ repos:
         language: system
         types: [go]
 
+      - id: golangci-lint
+        name: golangci-lint
+        entry: sh -c 'cd server && golangci-lint run ./...'
+        language: system
+        files: ^server/.*\.go$
+        pass_filenames: false
+
       - id: swift-format
         name: swift-format
         entry: swift-format format -i
