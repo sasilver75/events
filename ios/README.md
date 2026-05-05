@@ -61,10 +61,24 @@ Worker, defined in [ADR 0021](../docs/adr/0021-self-hosted-pmtiles-cloudflare-wo
 - **Worker source:** [`workers/spur-tiles/`](../workers/spur-tiles/)
 - **Glyphs / sprites:** `protomaps.github.io/basemaps-assets` (public, no key)
 
-`MapStyleLight.json` is a hand-rolled minimal Protomaps-schema style: background,
-earth, water, parks, road kinds (highway → minor), country boundaries, locality
-and neighbourhood labels. Replace with a richer theme (e.g. the Protomaps
-`themes-base` output) when product UI demands it.
+`MapStyleLight.json` is the unmodified output of [`@protomaps/basemaps`](https://github.com/protomaps/basemaps)
+for the `LIGHT` flavor, with the `protomaps` source pointed at the `spur-tiles`
+Worker. It is a build artifact — do not hand-edit. Spur-specific overlays
+(currently the 3D buildings extrusion at zoom ≥14) live in `MapView.swift` and
+are added at runtime via `MLNStyle.addLayer`, keeping the vendored JSON a clean
+themes-base export so it stays cleanly regeneratable when the upstream schema
+updates.
+
+### Regenerating the map style
+
+```sh
+cd style
+npm install
+npm run generate
+```
+
+This rewrites `Spur/Spur/MapStyleLight.json`. Bump
+`@protomaps/basemaps` in `style/package.json` to pick up upstream changes.
 
 ## Signing
 
