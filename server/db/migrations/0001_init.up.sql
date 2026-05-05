@@ -1,0 +1,3 @@
+-- 0001_init: no-op placeholder.
+-- Real schema (users, events, commits + RLS) lands in issue #7.
+-- golang-migrate creates schema_migrations on first run regardless.

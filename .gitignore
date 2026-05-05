@@ -23,6 +23,7 @@ Icon?
 *.out
 /server/bin/
 /server/dist/
+/server/server
 /server/coverage.out
 /server/coverage.html
 /server/vendor/
