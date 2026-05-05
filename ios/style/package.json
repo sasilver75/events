@@ -1,0 +1,13 @@
+{
+  "name": "spur-map-style",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Generates the bundled MapLibre style JSON for the Spur iOS app from @protomaps/basemaps. See ios/README.md.",
+  "type": "module",
+  "scripts": {
+    "generate": "node generate.js"
+  },
+  "dependencies": {
+    "@protomaps/basemaps": "^5.7.2"
+  }
+}
