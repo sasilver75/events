@@ -59,10 +59,12 @@ supabase/.temp/
 # Environment / secrets
 .env
 .env.*
-!.env.example
 
 # Logs
 *.log
+
+# Claude Code worktrees (ephemeral agent checkouts)
+.claude/worktrees/
 
 # Misc
 *.bak
