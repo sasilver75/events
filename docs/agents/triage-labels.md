@@ -16,11 +16,13 @@ Edit the right-hand column to match whatever vocabulary you actually use.
 
 ## Workflow
 
-Every issue starts as `needs-triage` (GitHub default for new issues). **Before any substantive work begins**, transition the label to the appropriate role:
+**Before work starts.** Every issue begins as `needs-triage` (GitHub default). Transition the label to the appropriate role before any substantive work:
 
 - HITL work (requires maintainer hands — credentials, hosted account setup, deploy platform, App Store submission, anything an unattended agent can't finish) → `ready-for-human`
 - Fully specified for unattended agent execution → `ready-for-agent`
 - Underspecified, awaiting reporter input → `needs-info`
 - Rejected → `wontfix`
 
-`gh issue edit N --remove-label needs-triage --add-label <role>`, or run `/triage` if the right role is unclear. A closed issue should never still be labeled `needs-triage` — that means the workflow was bypassed.
+`gh issue edit N --remove-label needs-triage --add-label <role>`, or run `/triage` if the right role is unclear.
+
+**After close.** Role labels persist as a record of how the work got done — `ready-for-agent` on a closed issue means "completed via AFK agent," `ready-for-human` means "completed via HITL." The label vocabulary reads two ways depending on state ("ready for X" → "completed via X"); don't strip at close. The one exception is `needs-triage` — if it's still on a closed issue, the workflow was bypassed entirely and the label is genuinely stale.
