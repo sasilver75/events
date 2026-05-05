@@ -45,6 +45,9 @@ build/
 *.dSYM.zip
 *.dSYM
 
+# Per-worktree iOS simulator pin (see CLAUDE.md "Multi-session coordination")
+.spur-sim
+
 # Swift Package Manager
 .build/
 .swiftpm/

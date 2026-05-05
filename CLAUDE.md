@@ -78,6 +78,30 @@ Use `/tdd` for non-trivial features: red → green → refactor.
   from the spec and why) when not. The diff and commit messages don't capture
   decisions made under pressure — the closeout comment does.
 
+## Multi-session coordination
+
+Two Claude Code sessions can run in parallel against different worktrees.
+Without partitioning, they will clobber each other's iOS simulator state and
+build artifacts. Rules:
+
+- **Pin one simulator per worktree.** Each worktree root holds a gitignored
+  `.spur-sim` file with `SPUR_SIM_UDID`, `SPUR_SIM_NAME`, and
+  `SPUR_DERIVED_DATA`. Always read it before any `simctl` / `xcodebuild` /
+  XcodeBuildMCP call. **Never** target `booted` or
+  `generic/platform=iOS Simulator` — they are shared.
+- **Create `.spur-sim` if missing.** Run `xcrun simctl list devices available`
+  to find an `iPhone 17*` UDID, cross-check sibling worktrees'
+  `.spur-sim` (`cat ../*/.spur-sim 2>/dev/null`) so you don't pick a UDID
+  another session has already claimed, then write the file. Boot the
+  simulator with that UDID before installing.
+- **Worktree-local DerivedData.** Pass `-derivedDataPath ./.build/derived-data`
+  to every `xcodebuild` invocation (and the equivalent parameter to
+  XcodeBuildMCP). `.build/` is already gitignored.
+- **Use XcodeBuildMCP for sim interaction.** Tap, swipe, screenshot, and
+  accessibility-tree dumps go through XcodeBuildMCP — not raw simctl, not
+  AppleScript, not pixel coordinates. Pass the worktree's pinned UDID and
+  derived-data path explicitly to every MCP call.
+
 ## Agent skills
 
 ### Issue tracker
