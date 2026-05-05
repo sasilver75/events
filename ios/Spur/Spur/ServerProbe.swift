@@ -1,7 +1,10 @@
 import Foundation
 
 enum ServerProbe {
-  struct MeResponse: Decodable { let user_id: String }
+  struct MeResponse: Decodable {
+    let userID: String
+    enum CodingKeys: String, CodingKey { case userID = "user_id" }
+  }
 
   enum ProbeError: LocalizedError {
     case noToken
@@ -28,7 +31,7 @@ enum ServerProbe {
       guard code == 200 else {
         throw ProbeError.http(code, String(data: data, encoding: .utf8) ?? "")
       }
-      return try JSONDecoder().decode(MeResponse.self, from: data).user_id
+      return try JSONDecoder().decode(MeResponse.self, from: data).userID
     } catch let e as ProbeError {
       throw e
     } catch {
