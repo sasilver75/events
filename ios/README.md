@@ -12,6 +12,7 @@ ios/
     │   ├── SpurApp.swift
     │   ├── ContentView.swift
     │   ├── MapView.swift
+    │   ├── AttributionView.swift
     │   ├── MapStyleLight.json
     │   └── Assets.xcassets/
     ├── SpurTests/             ← Swift Testing
@@ -79,6 +80,20 @@ npm run generate
 
 This rewrites `Spur/Spur/MapStyleLight.json`. Bump
 `@protomaps/basemaps` in `style/package.json` to pick up upstream changes.
+
+## Attribution
+
+The MapLibre Native built-in logo and attribution button are hidden in
+`MapView.swift` for visual cleanliness. To stay compliant with OpenStreetMap's
+Open Database License (ODbL) and the Protomaps usage terms, attribution is
+surfaced via `AttributionView.swift` — a SwiftUI screen reachable from the
+info button on the map. It credits OpenStreetMap (data), Protomaps (tiles),
+and MapLibre Native (renderer); each row opens its source in
+`SFSafariViewController`.
+
+The screen gates distribution: any TestFlight or App Store build must ship
+with it reachable. Sim/dev runs do not require it but should not be shipped
+to real users without it.
 
 ## Signing
 
