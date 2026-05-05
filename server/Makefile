@@ -1,4 +1,4 @@
-.PHONY: run build test fmt lint migrate-up migrate-down migrate-create deploy
+.PHONY: run build test fmt lint migrate-up migrate-down migrate-create seed deploy
 
 DB_URL ?= $(DATABASE_URL)
 MIGRATIONS_PATH = db/migrations
@@ -27,6 +27,9 @@ migrate-down:
 migrate-create:
 	@test -n "$(name)" || (echo "usage: make migrate-create name=<snake_case_name>"; exit 1)
 	migrate create -ext sql -dir $(MIGRATIONS_PATH) -seq $(name)
+
+seed:
+	go run ./db/seeds
 
 deploy:
 	fly deploy

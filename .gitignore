@@ -24,6 +24,8 @@ Icon?
 /server/bin/
 /server/dist/
 /server/server
+/server/seeds
+/server/db/seeds/seeds
 /server/coverage.out
 /server/coverage.html
 /server/vendor/

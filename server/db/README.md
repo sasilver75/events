@@ -99,6 +99,35 @@ on `users` is deferred to the same.
 `auth.uid()` returns the JWT subject, set by Supabase from the iOS
 client's bearer token.
 
+## Curated event seed (issue #8)
+
+A small set of hand-curated α-Events lives in `seeds/` and is applied via
+`make seed` (from `/server/`). The seed populates `events` rows with
+`source = 'curated'` and a stable `seed_key`, hosted by a dedicated
+**Spur Seed** Supabase Auth user (`spur-seed@spur.local`).
+
+The runner is a Go program because provisioning the Spur Seed Auth user
+requires the Supabase Auth Admin API, not raw SQL. On each invocation it:
+
+1. Looks up `spur-seed@spur.local` in `auth.users` via the Admin API; creates
+   the user (with `email_confirm: true`) if absent. Captures the UUID.
+2. Upserts the corresponding `public.users` row (`display_name = 'Spur Seed'`).
+3. Upserts each curated Event keyed by `seed_key`, refreshing time-sensitive
+   fields like `start_at` so re-running the seed keeps Events in the upcoming
+   72-hour window.
+
+The maintainer does not get in-app affordances over seed Events — to change
+them, edit `seeds/events.go` and re-run. This is intentional: seed Events are
+platform content. Singular `host_user_id` is the deliberate v0 choice — see
+[ADR 0018](../../docs/adr/0018-singular-host-defer-multi-host.md).
+
+```bash
+make seed     # idempotent; runs locally and against staging
+```
+
+Required env: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+(see `/server/.env.example`).
+
 ## Integration test
 
 `schema_test.go` connects to Postgres via `pgx`, verifies PostGIS is
