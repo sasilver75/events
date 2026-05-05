@@ -3,6 +3,15 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   server:
@@ -54,9 +63,13 @@ jobs:
         working-directory: server
         run: make migrate-up DB_URL="${DATABASE_URL}?sslmode=disable"
 
+      - name: Go build
+        working-directory: server
+        run: go build ./...
+
       - name: Go test
         working-directory: server
-        run: go test ./...
+        run: go test -race ./...
 
       - name: Stop Supabase
         if: always()
