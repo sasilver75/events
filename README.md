@@ -53,3 +53,36 @@ Copy `server/.env.example` to `server/.env` and fill in the values that
 Full walkthrough — including Docker prerequisites, day-to-day commands, and
 how migrations promote from local → staging → production — lives in
 [`server/README.md`](./server/README.md#local-development).
+
+### Auto-format on Claude Code edits
+
+`.claude/settings.json` registers a `PostToolUse` hook that runs
+[`scripts/claude-format.sh`](./scripts/claude-format.sh) after every `Edit`
+or `Write` tool call. The script dispatches by file extension:
+
+- `*.go` → `gofmt -w` then `goimports -w`
+- `*.swift` → `swift-format format -i`
+
+Other extensions are ignored.
+
+If a required formatter is missing on `PATH`, the hook logs a loud error to
+stderr and exits non-zero. The original edit still lands (`PostToolUse`
+runs after the tool call completes), but the file won't be formatted until
+the binary is installed.
+
+Required binaries (installed once per developer):
+
+```sh
+brew install swift-format
+go install golang.org/x/tools/cmd/goimports@latest
+# ensure $(go env GOPATH)/bin is on PATH so goimports is found
+```
+
+`gofmt` ships with Go.
+
+To disable locally, delete or edit `.claude/settings.json`. (The gitignored
+`.claude/settings.local.json` overrides project settings if you want to
+disable without touching the checked-in file.)
+
+A separate pre-commit hook (issue #5) and CI check (issue #6) will provide
+the same guarantee for non-Claude edits.
