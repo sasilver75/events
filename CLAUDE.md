@@ -72,6 +72,9 @@ Use `/tdd` for non-trivial features: red → green → refactor.
   still carry `needs-triage`.
 - **PRDs** → `/to-prd` writes them to GitHub.
 - **Branches** → one per issue. PRs target `main`.
+- **PR titles** → when the work originates from a GitHub issue, append
+  `(#N)` to the title (e.g. `auth: Phase 1 iOS … (#9)`). GitHub auto-links
+  it and `gh pr list` becomes scannable for which PR addressed which issue.
 - **Commits** → conventional prose; WHY in the message body.
 - **Closeouts** → On every issue close, leave a comment. "Shipped per spec —
   <commit>" when the AC was met as written; a short drift list (what diverged
