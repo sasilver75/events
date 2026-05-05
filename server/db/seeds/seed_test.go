@@ -51,7 +51,7 @@ func countCurated(ctx context.Context, t *testing.T, dbURL string) int {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 
 	var n int
 	if err := conn.QueryRow(ctx, `SELECT count(*) FROM public.events WHERE source = 'curated'`).Scan(&n); err != nil {
@@ -66,7 +66,7 @@ func countSeedUsers(ctx context.Context, t *testing.T, dbURL string) int {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 
 	var n int
 	if err := conn.QueryRow(ctx, `SELECT count(*) FROM public.users WHERE display_name = 'Spur Seed'`).Scan(&n); err != nil {

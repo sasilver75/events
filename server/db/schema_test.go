@@ -19,7 +19,7 @@ func TestSchemaBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 
 	t.Run("postgis extension installed", func(t *testing.T) {
 		var ok bool

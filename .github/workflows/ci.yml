@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  server:
+    name: Server (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Verify gofmt
+        working-directory: server
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would reformat:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          working-directory: server
+          version: v2.12.1
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase
+        run: supabase start
+
+      - name: Export Supabase env
+        run: |
+          eval "$(supabase status -o env)"
+          {
+            echo "DATABASE_URL=$DB_URL"
+            echo "SUPABASE_URL=$API_URL"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+          } >> "$GITHUB_ENV"
+
+      - name: Go test
+        working-directory: server
+        run: go test ./...
+
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup
+
+  ios:
+    name: iOS (Swift)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Cache SPM
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData/**/SourcePackages
+          key: ${{ runner.os }}-spm-${{ hashFiles('ios/Spur/Spur.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Install swift-format
+        run: brew install swift-format
+
+      - name: swift-format lint
+        run: swift-format lint --strict --recursive ios
+
+      - name: Pick iOS Simulator destination
+        id: sim
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j \
+            | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          best = None
+          for runtime, devs in data['devices'].items():
+              if 'iOS' not in runtime:
+                  continue
+              for d in devs:
+                  if not d.get('isAvailable'):
+                      continue
+                  if not d['name'].startswith('iPhone'):
+                      continue
+                  best = (runtime, d)
+          if not best:
+              sys.exit('no available iOS Simulator iPhone found')
+          print(best[1]['udid'])
+          ")
+          echo "udid=$DEVICE" >> "$GITHUB_OUTPUT"
+          echo "Using simulator UDID: $DEVICE"
+
+      - name: xcodebuild test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project ios/Spur/Spur.xcodeproj \
+            -scheme Spur \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO
