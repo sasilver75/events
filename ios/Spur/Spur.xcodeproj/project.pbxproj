@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		D79754CC2FA9E4A600AFDFB6 /* MapLibre in Frameworks */ = {isa = PBXBuildFile; productRef = D79754CB2FA9E4A600AFDFB6 /* MapLibre */; };
+		D79754ED2FAA997C00AFDFB6 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = D79754EC2FAA997C00AFDFB6 /* Supabase */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -31,6 +32,7 @@
 		D797549B2FA9E0B200AFDFB6 /* Spur.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Spur.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D79754A82FA9E0B200AFDFB6 /* SpurTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SpurTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D79754B22FA9E0B200AFDFB6 /* SpurUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SpurUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D79754EE2FAA9A2E00AFDFB6 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -56,6 +58,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D79754ED2FAA997C00AFDFB6 /* Supabase in Frameworks */,
 				D79754CC2FA9E4A600AFDFB6 /* MapLibre in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -85,6 +88,7 @@
 				D79754B52FA9E0B200AFDFB6 /* SpurUITests */,
 				D79754CA2FA9E4A600AFDFB6 /* Frameworks */,
 				D797549C2FA9E0B200AFDFB6 /* Products */,
+				D79754EE2FAA9A2E00AFDFB6 /* Local.xcconfig */,
 			);
 			sourceTree = "<group>";
 		};
@@ -126,6 +130,7 @@
 			name = Spur;
 			packageProductDependencies = (
 				D79754CB2FA9E4A600AFDFB6 /* MapLibre */,
+				D79754EC2FAA997C00AFDFB6 /* Supabase */,
 			);
 			productName = Spur;
 			productReference = D797549B2FA9E0B200AFDFB6 /* Spur.app */;
@@ -211,6 +216,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				D79754C52FA9E24800AFDFB6 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */,
+				D79754EB2FAA997C00AFDFB6 /* XCRemoteSwiftPackageReference "supabase-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D797549C2FA9E0B200AFDFB6 /* Products */;
@@ -288,6 +294,7 @@
 /* Begin XCBuildConfiguration section */
 		D79754BA2FA9E0B200AFDFB6 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = D79754EE2FAA9A2E00AFDFB6 /* Local.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -351,6 +358,7 @@
 		};
 		D79754BB2FA9E0B200AFDFB6 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = D79754EE2FAA9A2E00AFDFB6 /* Local.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -601,6 +609,14 @@
 				version = 6.26.0;
 			};
 		};
+		D79754EB2FAA997C00AFDFB6 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -608,6 +624,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D79754C52FA9E24800AFDFB6 /* XCRemoteSwiftPackageReference "maplibre-gl-native-distribution" */;
 			productName = MapLibre;
+		};
+		D79754EC2FAA997C00AFDFB6 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D79754EB2FAA997C00AFDFB6 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

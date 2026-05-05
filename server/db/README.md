@@ -30,11 +30,21 @@ follows [`CONTEXT.md`](../../CONTEXT.md) verbatim.
 ### `public.users`
 
 Mirrors the row in `auth.users` that Supabase Auth creates on phone-OTP
-sign-up. The mirror is populated **lazily by the Go server** on first
-authenticated request (issue #9), not by a Postgres trigger — per
-[ADR 0005](../../docs/adr/0005-supabase-data-plane-go-server-business-logic.md),
-business logic stays in Go and DB triggers are reserved for mechanical
-concerns.
+sign-up. The mirror is populated by a **Postgres `AFTER INSERT` trigger**
+on `auth.users` (migration `0006_mirror_auth_users`,
+[ADR 0022](../../docs/adr/0022-auth-users-mirror-trigger.md)), which fires
+inside Supabase Auth's own transaction. This guarantees that the moment an
+`auth.users` row exists, the matching `public.users` row exists too — no
+half-state can be observed by RLS policies, FK targets, or the Go server.
+
+The trigger is the only PL/pgSQL the project ships at v0. It fits ADR
+0005's "DB triggers acceptable for mechanical concerns" carve-out: pure
+row mirroring on the same identifier, no domain rules, no conditionals
+beyond `ON CONFLICT DO NOTHING`. ADR 0022 records the decision and defines
+what counts as "mechanical" for future judgment calls.
+
+A previous draft of issue #9 had the Go middleware do a lazy upsert on
+every authenticated request. ADR 0022 reversed that.
 
 | Column         | Type          | Notes                                |
 | -------------- | ------------- | ------------------------------------ |
