@@ -13,12 +13,25 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/sasilver75/events/server/internal/auth"
 )
 
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
+	}
+
+	supabaseURL := os.Getenv("SUPABASE_URL")
+	if supabaseURL == "" {
+		log.Fatalf("SUPABASE_URL must be set")
+	}
+
+	ctx := context.Background()
+	verifier, err := auth.NewVerifier(ctx, supabaseURL)
+	if err != nil {
+		log.Fatalf("auth verifier: %v", err)
 	}
 
 	r := chi.NewRouter()
@@ -29,6 +42,11 @@ func main() {
 	r.Use(middleware.Timeout(15 * time.Second))
 
 	r.Get("/healthz", healthz)
+
+	r.Group(func(r chi.Router) {
+		r.Use(verifier.Middleware)
+		r.Get("/me", auth.Me)
+	})
 
 	srv := &http.Server{
 		Addr:              ":" + port,
@@ -48,14 +66,14 @@ func main() {
 	<-stop
 
 	log.Println("server shutting down")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("shutdown error: %v", err)
 	}
 }
 
-func healthz(w http.ResponseWriter, r *http.Request) {
+func healthz(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})

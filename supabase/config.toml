@@ -251,7 +251,7 @@ otp_expiry = 3600
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.
-enable_signup = false
+enable_signup = true
 # If enabled, users need to confirm their phone number before signing in.
 enable_confirmations = false
 # Template for sending OTP to users
@@ -259,9 +259,11 @@ template = "Your code is {{ .Code }}"
 # Controls the minimum amount of time that must pass before sending another sms otp.
 max_frequency = "5s"
 
-# Use pre-defined map of phone number to OTP for testing.
-# [auth.sms.test_otp]
-# 4152127777 = "123456"
+# Local-only test OTP map: lets the iOS sign-in screen exercise the real
+# Supabase Auth phone path without a real SMS provider. Hosted staging gets
+# Twilio + the dashboard switch in #9 Phase 2 (HITL).
+[auth.sms.test_otp]
+4152127777 = "123456"
 
 # Configure logged in session timeouts.
 # [auth.sessions]
@@ -281,10 +283,15 @@ max_frequency = "5s"
 # uri = "pg-functions://<database>/<schema>/<hook_name>"
 
 # Configure one of the supported SMS providers: `twilio`, `twilio_verify`, `messagebird`, `textlocal`, `vonage`.
+# Twilio is enabled here with stub credentials so Supabase Auth's phone OTP
+# path is wired up. The [auth.sms.test_otp] map above short-circuits the
+# actual provider call for the seeded number, so no real SMS is ever sent
+# locally and the stub auth_token is never used. Hosted staging gets real
+# Twilio credentials in #9 Phase 2 (HITL).
 [auth.sms.twilio]
-enabled = false
-account_sid = ""
-message_service_sid = ""
+enabled = true
+account_sid = "stub-local-sid"
+message_service_sid = "stub-local-msg-sid"
 # DO NOT commit your Twilio auth token to git. Use environment variable substitution instead:
 auth_token = "env(SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN)"
 
