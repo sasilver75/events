@@ -59,6 +59,13 @@ Package.resolved
 supabase/.branches/
 supabase/.temp/
 
+# Cloudflare Wrangler (local cache + state)
+.wrangler/
+.dev.vars
+
+# Node (Workers projects)
+node_modules/
+
 # Environment / secrets
 .env
 .env.*
