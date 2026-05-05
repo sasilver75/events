@@ -84,5 +84,26 @@ To disable locally, delete or edit `.claude/settings.json`. (The gitignored
 `.claude/settings.local.json` overrides project settings if you want to
 disable without touching the checked-in file.)
 
-A separate pre-commit hook (issue #5) and CI check (issue #6) will provide
-the same guarantee for non-Claude edits.
+### Pre-commit format hooks
+
+`.pre-commit-config.yaml` runs `gofmt` + `goimports` on staged Go files
+and `swift-format` on staged Swift files. If a formatter rewrites a file,
+the commit aborts; re-stage and re-commit.
+
+One-time setup per clone:
+
+```sh
+brew install pre-commit
+pre-commit install
+```
+
+The Go and Swift binaries are the same ones the Claude Code hook uses —
+install instructions are above. To check the whole tree (e.g. before
+opening a PR):
+
+```sh
+pre-commit run --all-files
+```
+
+A CI check (issue #6) will guard against contributors who skip
+`pre-commit install`.
