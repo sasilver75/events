@@ -73,10 +73,23 @@ struct EventDetailSheet: View {
     VStack(alignment: .leading, spacing: 8) {
       Text("About")
         .font(.headline)
-      Text(event.description)
+      Text(Self.renderMarkdown(event.description))
         .font(.body)
         .foregroundStyle(.primary)
     }
+  }
+
+  // Hosts write descriptions in Markdown; the server stores plain text.
+  // Inline-only-preserving-whitespace keeps bold/italic/links and newlines
+  // (so `- item` lines stay on their own line) without pulling in block
+  // layout that SwiftUI's `Text` can't fully render.
+  static func renderMarkdown(_ raw: String) -> AttributedString {
+    let options = AttributedString.MarkdownParsingOptions(
+      interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    if let parsed = try? AttributedString(markdown: raw, options: options) {
+      return parsed
+    }
+    return AttributedString(raw)
   }
 
   private static func dateLine(_ d: Date) -> String {
