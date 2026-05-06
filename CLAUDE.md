@@ -137,6 +137,21 @@ build artifacts. Rules:
   `supabase status -o env --workdir <worktree-root>`. The pin file
   intentionally omits them — they're shared across local Supabase CLI
   installs and easy to refetch.
+- **Use `scripts/spur-up.sh` to boot a worktree's stack.** It handles the
+  full sequence in the right order: detect orphan Supabase stacks (deleted
+  worktrees whose containers are still running) and offer to clean them →
+  run `spur-services-init.sh` if missing → `supabase start` → migrate-up →
+  seed → start the Go server in the background. Idempotent. After it
+  finishes, the iOS app can build_run_sim against the worktree's stack.
+  `scripts/spur-down.sh` is the inverse.
+- **Always tear down before deleting a worktree.** Orphan Supabase stacks
+  silently starve Postgres in the *active* worktree — symptoms look like
+  inexplicable per-query latency (sub-ms queries balloon to seconds,
+  intermittently). Each idle stack is ~13 containers; `supabase_analytics_*`
+  (Logflare) in particular pegs a CPU core. Before deleting a worktree,
+  run `scripts/spur-down.sh`. If a worktree is already gone, the next
+  `scripts/spur-up.sh` in any other worktree will detect the orphan and
+  prompt to clean it up.
 
 ## Agent skills
 
