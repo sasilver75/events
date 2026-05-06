@@ -29,10 +29,10 @@ type nearbyEvent struct {
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	Category    string    `json:"category"`
-	StartAt     time.Time `json:"start_at"`
+	StartTime   time.Time `json:"start_time"`
 	Lat         float64   `json:"lat"`
 	Lon         float64   `json:"lon"`
-	Cap         int       `json:"cap"`
+	Cap         *int      `json:"cap"`
 	CommitCount int       `json:"commit_count"`
 }
 
@@ -220,7 +220,7 @@ func findEventByKey(ctx context.Context, t *testing.T, pool *pgxpool.Pool, key s
 	var e seedEventCoords
 	var displayLat, displayLon *float64
 	err := pool.QueryRow(ctx, `
-		SELECT id, center_lat, center_lon,
+		SELECT id, ST_Y(geom)::float8, ST_X(geom)::float8,
 			ST_Y(display_geom)::float8, ST_X(display_geom)::float8
 		FROM public.events
 		WHERE seed_key = $1
@@ -259,9 +259,9 @@ func requireSeedEvents(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
-// insertPastSeedEvent creates a curated event whose start_at + duration is
-// already in the past, returning its id. Reuses the spur-seed host so the
-// FK to public.users is satisfied.
+// insertPastSeedEvent creates a curated event whose end_time is already in
+// the past, returning its id. Reuses the spur-seed host so the FK to
+// public.users is satisfied.
 func insertPastSeedEvent(ctx context.Context, t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	var hostID string
@@ -273,13 +273,14 @@ func insertPastSeedEvent(ctx context.Context, t *testing.T, pool *pgxpool.Pool) 
 	var id string
 	err := pool.QueryRow(ctx, `
 		INSERT INTO public.events (
-			host_user_id, title, description, category,
-			start_at, duration_minutes, cap,
-			center_lat, center_lon, source, location_visibility
+			host_id, title, description, category,
+			start_time, end_time, cap,
+			geom, source, location_visibility
 		) VALUES (
 			$1, 'past event', 'past event', 'Other',
-			now() - interval '2 hours', 30, 4,
-			34.0522, -118.2437, 'curated', 'public'
+			now() - interval '2 hours', now() - interval '90 minutes', 4,
+			ST_SetSRID(ST_MakePoint(-118.2437, 34.0522), 4326),
+			'curated', 'public'
 		) RETURNING id
 	`, hostID).Scan(&id)
 	if err != nil {

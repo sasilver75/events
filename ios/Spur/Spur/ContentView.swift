@@ -12,6 +12,7 @@ struct ContentView: View {
 
   @State private var showingPermissionPrompt = false
   @State private var showingAttribution = false
+  @State private var showingCreateSheet = false
   @State private var probeResult: String?
   @State private var probeRunning = false
 
@@ -74,6 +75,11 @@ struct ContentView: View {
     .sheet(item: $selectedEvent) { event in
       EventDetailSheet(event: event)
     }
+    .sheet(isPresented: $showingCreateSheet) {
+      CreateEventSheet(
+        initialCenter: losAngeles,
+        onCreated: { Task { await refetchAfterCreate() } })
+    }
     .alert(
       "Server probe",
       isPresented: Binding(
@@ -102,6 +108,16 @@ struct ContentView: View {
         .background(.regularMaterial, in: Capsule())
 
       Spacer()
+
+      Button {
+        showingCreateSheet = true
+      } label: {
+        Image(systemName: "plus")
+          .font(.title2)
+          .padding(8)
+          .background(.regularMaterial, in: Circle())
+      }
+      .accessibilityIdentifier("topBar.create")
 
       Menu {
         Button {
@@ -201,6 +217,10 @@ struct ContentView: View {
       fetchError = error.localizedDescription
       hasFetched = true
     }
+  }
+
+  private func refetchAfterCreate() async {
+    await fetch(near: location.lastFix ?? losAngeles)
   }
 
   // MARK: dev probe

@@ -58,6 +58,56 @@ enum EventsAPI {
       throw APIError.decode(error.localizedDescription)
     }
   }
+
+  struct CreateInput: Encodable {
+    let title: String
+    let description: String
+    let category: String
+    let startTime: Date
+    let endTime: Date
+    let lat: Double
+    let lon: Double
+    let cap: Int?
+    let locationVisibility: String
+
+    enum CodingKeys: String, CodingKey {
+      case title, description, category
+      case startTime = "start_time"
+      case endTime = "end_time"
+      case lat, lon, cap
+      case locationVisibility = "location_visibility"
+    }
+  }
+
+  static func create(_ input: CreateInput, auth: AuthModel) async throws {
+    guard let token = await auth.accessToken() else { throw APIError.noToken }
+
+    var req = URLRequest(url: SupabaseConfig.serverURL.appendingPathComponent("events"))
+    req.httpMethod = "POST"
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    do {
+      req.httpBody = try encoder.encode(input)
+    } catch {
+      throw APIError.transport("encode body: \(error.localizedDescription)")
+    }
+
+    let data: Data
+    let resp: URLResponse
+    do {
+      (data, resp) = try await URLSession.shared.data(for: req)
+    } catch {
+      throw APIError.transport(error.localizedDescription)
+    }
+
+    let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+    guard code == 201 else {
+      throw APIError.http(code, String(data: data, encoding: .utf8) ?? "")
+    }
+  }
 }
 
 // Postgres TIMESTAMPTZ marshals as RFC3339 with fractional seconds (e.g.

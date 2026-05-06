@@ -13,8 +13,8 @@ type CuratedEvent struct {
 	Title              string
 	Description        string
 	Category           string
-	StartAt            time.Time
-	DurationMinutes    int
+	StartTime          time.Time
+	EndTime            time.Time
 	Cap                int
 	CenterLat          float64
 	CenterLon          float64
@@ -44,15 +44,15 @@ func curatedEvents(now time.Time) []CuratedEvent {
 
 	events := []CuratedEvent{
 		{
-			SeedKey:         "la-venice-beach-pickup-basketball",
-			Title:           "Pickup basketball at Venice Beach",
-			Description:     "5v5 pickup at the Venice Beach courts on Ocean Front Walk. All skill levels welcome — call winners.",
-			Category:        "Sports",
-			StartAt:         tomorrow,
-			DurationMinutes: 90,
-			Cap:             10,
-			CenterLat:       33.9866,
-			CenterLon:       -118.4715,
+			SeedKey:     "la-venice-beach-pickup-basketball",
+			Title:       "Pickup basketball at Venice Beach",
+			Description: "5v5 pickup at the Venice Beach courts on Ocean Front Walk. All skill levels welcome — call winners.",
+			Category:    "Sports",
+			StartTime:   tomorrow,
+			EndTime:     tomorrow.Add(90 * time.Minute),
+			Cap:         10,
+			CenterLat:   33.9866,
+			CenterLon:   -118.4715,
 			// Public boardwalk courts — venue is the entire stretch, fuzzing has no
 			// privacy value here. Exercises the 'public' branch of the response.
 			LocationVisibility: "public",
@@ -62,8 +62,8 @@ func curatedEvents(now time.Time) []CuratedEvent {
 			Title:              "Morning coffee at Intelligentsia Silver Lake",
 			Description:        "Friendly coffee meetup at Intelligentsia on Sunset. Drop in, grab a drink, chat with whoever shows up.",
 			Category:           "Food/Drink",
-			StartAt:            morning,
-			DurationMinutes:    60,
+			StartTime:          morning,
+			EndTime:            morning.Add(60 * time.Minute),
 			Cap:                6,
 			CenterLat:          34.0858,
 			CenterLon:          -118.2710,
@@ -74,8 +74,8 @@ func curatedEvents(now time.Time) []CuratedEvent {
 			Title:              "Sunset hike at Griffith Observatory",
 			Description:        "Easy hike up the Mount Hollywood trail from the Observatory parking lot. Bring water and a layer for after dark.",
 			Category:           "Outdoors",
-			StartAt:            dayAfter,
-			DurationMinutes:    120,
+			StartTime:          dayAfter,
+			EndTime:            dayAfter.Add(2 * time.Hour),
 			Cap:                8,
 			CenterLat:          34.1184,
 			CenterLon:          -118.3004,

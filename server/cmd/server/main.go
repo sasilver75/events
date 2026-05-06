@@ -61,6 +61,7 @@ func main() {
 		r.Use(verifier.Middleware)
 		r.Get("/me", auth.Me)
 		r.Get("/events", eventsHandler.Near)
+		r.Post("/events", eventsHandler.Create)
 	})
 
 	srv := &http.Server{
