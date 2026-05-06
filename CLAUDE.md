@@ -108,6 +108,30 @@ build artifacts. Rules:
   accessibility-tree dumps go through XcodeBuildMCP — not raw simctl, not
   AppleScript, not pixel coordinates. Pass the worktree's pinned UDID and
   derived-data path explicitly to every MCP call.
+- **Pin host-level services per worktree.** Two workers `supabase start`-ing
+  (or any other host-level service starting) against the same default ports
+  collide. Each worktree is assigned a single `SPUR_OFFSET` and every
+  networked service derives its ports from that offset. Today the script
+  only renders Supabase config; future networked services (Go server,
+  Redis, etc.) extend the same pin and the same template-rendering pattern.
+  Run `./scripts/spur-services-init.sh` once per worktree (idempotent — pass
+  `--force` to regenerate). The script picks the lowest free offset by
+  reading sibling `.spur-services` pins and probing for already-bound
+  ports, then renders `supabase/config.toml` from
+  `supabase/config.toml.template` (gitignored) with project_id set to the
+  worktree directory name. The `.spur-services` pin declares `SPUR_OFFSET`,
+  `SPUR_PROJECT_ID`, and `SPUR_SUPABASE_*` URLs; `source .spur-services`
+  to point shells, tests, and Make targets at the worktree's instances.
+- **Don't `supabase start` without running the init script first.** A
+  hard-coded port collision will fail loudly; a stale `project_id` collision
+  (two stacks reusing the same docker container names) will fail silently
+  by reusing whichever volume Docker grabbed first. The init script
+  derives `project_id` from the worktree directory name, so as long as it
+  runs, container names stay unique.
+- **Anon / service-role keys for tests** come from the worktree's stack via
+  `supabase status -o env --workdir <worktree-root>`. The pin file
+  intentionally omits them — they're shared across local Supabase CLI
+  installs and easy to refetch.
 
 ## Agent skills
 

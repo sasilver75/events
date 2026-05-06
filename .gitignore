@@ -48,6 +48,12 @@ build/
 # Per-worktree iOS simulator pin (see CLAUDE.md "Multi-session coordination")
 .spur-sim
 
+# Per-worktree services pin + rendered Supabase config (see CLAUDE.md "Multi-session coordination").
+# The canonical config lives in supabase/config.toml.template; each worktree renders its own
+# supabase/config.toml from it via scripts/spur-services-init.sh.
+.spur-services
+supabase/config.toml
+
 # Swift Package Manager
 .build/
 .swiftpm/
