@@ -65,12 +65,19 @@ struct MapView: UIViewRepresentable {
     }
 
     func sync(events: [NearbyEvent], on mapView: MLNMapView) {
-      let nextIDs = Set(events.map { $0.id })
+      let nextByID = Dictionary(uniqueKeysWithValues: events.map { ($0.id, $0) })
 
-      let toRemove = byID.filter { !nextIDs.contains($0.key) }
-      if !toRemove.isEmpty {
-        mapView.removeAnnotations(toRemove.values.map { $0 as MLNAnnotation })
-        for k in toRemove.keys { byID.removeValue(forKey: k) }
+      // Treat any payload diff as remove + re-add so coordinate, category,
+      // and commit-state changes all propagate to MapLibre. The cached
+      // EventAnnotation otherwise holds a stale NearbyEvent and didSelect
+      // hands an out-of-date copy back to SwiftUI.
+      var stale: [EventAnnotation] = []
+      for (id, annotation) in byID where nextByID[id] != annotation.event {
+        stale.append(annotation)
+      }
+      if !stale.isEmpty {
+        mapView.removeAnnotations(stale.map { $0 as MLNAnnotation })
+        for a in stale { byID.removeValue(forKey: a.event.id) }
       }
 
       var toAdd: [EventAnnotation] = []

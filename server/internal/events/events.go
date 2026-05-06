@@ -37,15 +37,16 @@ func New(pool *pgxpool.Pool) *Handler {
 }
 
 type nearbyEvent struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Category    string    `json:"category"`
-	StartTime   time.Time `json:"start_time"`
-	Lat         float64   `json:"lat"`
-	Lon         float64   `json:"lon"`
-	Cap         *int      `json:"cap"`
-	CommitCount int       `json:"commit_count"`
+	ID            string    `json:"id"`
+	Title         string    `json:"title"`
+	Description   string    `json:"description"`
+	Category      string    `json:"category"`
+	StartTime     time.Time `json:"start_time"`
+	Lat           float64   `json:"lat"`
+	Lon           float64   `json:"lon"`
+	Cap           *int      `json:"cap"`
+	CommitCount   int       `json:"commit_count"`
+	CommittedByMe bool      `json:"committed_by_me"`
 }
 
 // Near handles GET /events?near=lat,lon&radius_m=…
@@ -98,7 +99,8 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 				ELSE ST_X(e.display_geom)
 			END AS lon,
 			e.cap,
-			(SELECT count(*) FROM public.commits cc WHERE cc.event_id = e.id) AS commit_count
+			(SELECT count(*) FROM public.commits cc WHERE cc.event_id = e.id) AS commit_count,
+			(c.user_id IS NOT NULL) AS committed_by_me
 		FROM public.events e
 		LEFT JOIN public.commits c
 			ON c.event_id = e.id AND c.user_id = $3
@@ -122,7 +124,7 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 		var e nearbyEvent
 		if err := rows.Scan(
 			&e.ID, &e.Title, &e.Description, &e.Category, &e.StartTime,
-			&e.Lat, &e.Lon, &e.Cap, &e.CommitCount,
+			&e.Lat, &e.Lon, &e.Cap, &e.CommitCount, &e.CommittedByMe,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan: "+err.Error())
 			return

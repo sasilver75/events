@@ -7,6 +7,7 @@ enum EventsAPI {
     case http(Int, String)
     case transport(String)
     case decode(String)
+    case eventFull
 
     var errorDescription: String? {
       switch self {
@@ -14,7 +15,18 @@ enum EventsAPI {
       case .http(let code, let body): return "HTTP \(code): \(body)"
       case .transport(let s): return s
       case .decode(let s): return "decode: \(s)"
+      case .eventFull: return "This event is full"
       }
+    }
+  }
+
+  struct CommitState: Decodable {
+    let commitCount: Int
+    let committedByMe: Bool
+
+    enum CodingKeys: String, CodingKey {
+      case commitCount = "commit_count"
+      case committedByMe = "committed_by_me"
     }
   }
 
@@ -106,6 +118,52 @@ enum EventsAPI {
     let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
     guard code == 201 else {
       throw APIError.http(code, String(data: data, encoding: .utf8) ?? "")
+    }
+  }
+
+  static func commit(eventID: String, auth: AuthModel) async throws -> CommitState {
+    try await commitMutation(eventID: eventID, method: "POST", auth: auth)
+  }
+
+  static func withdraw(eventID: String, auth: AuthModel) async throws -> CommitState {
+    try await commitMutation(eventID: eventID, method: "DELETE", auth: auth)
+  }
+
+  private static func commitMutation(
+    eventID: String, method: String, auth: AuthModel
+  ) async throws -> CommitState {
+    guard let token = await auth.accessToken() else { throw APIError.noToken }
+
+    let url = SupabaseConfig.serverURL
+      .appendingPathComponent("events")
+      .appendingPathComponent(eventID)
+      .appendingPathComponent("commit")
+
+    var req = URLRequest(url: url)
+    req.httpMethod = method
+    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let data: Data
+    let resp: URLResponse
+    do {
+      (data, resp) = try await URLSession.shared.data(for: req)
+    } catch {
+      throw APIError.transport(error.localizedDescription)
+    }
+
+    let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+    if code == 409, let body = try? JSONDecoder().decode([String: String].self, from: data),
+      body["error"] == "event_full"
+    {
+      throw APIError.eventFull
+    }
+    guard code == 200 else {
+      throw APIError.http(code, String(data: data, encoding: .utf8) ?? "")
+    }
+    do {
+      return try JSONDecoder().decode(CommitState.self, from: data)
+    } catch {
+      throw APIError.decode(error.localizedDescription)
     }
   }
 }

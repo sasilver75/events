@@ -84,7 +84,12 @@ struct ContentView: View {
       .interactiveDismissDisabled()
     }
     .sheet(item: $selectedEvent) { event in
-      EventDetailSheet(event: event)
+      EventDetailSheet(event: event) { commitCount, committedByMe in
+        if let idx = events.firstIndex(where: { $0.id == event.id }) {
+          events[idx].commitCount = commitCount
+          events[idx].committedByMe = committedByMe
+        }
+      }
     }
     .sheet(item: $createSheetRequest) { request in
       CreateEventSheet(

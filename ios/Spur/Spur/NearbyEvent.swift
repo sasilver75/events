@@ -14,13 +14,15 @@ struct NearbyEvent: Decodable, Identifiable, Hashable {
   let lat: Double
   let lon: Double
   let cap: Int?
-  let commitCount: Int
+  var commitCount: Int
+  var committedByMe: Bool
 
   enum CodingKeys: String, CodingKey {
     case id, title, description, category
     case startTime = "start_time"
     case lat, lon, cap
     case commitCount = "commit_count"
+    case committedByMe = "committed_by_me"
   }
 
   var coordinate: CLLocationCoordinate2D {
