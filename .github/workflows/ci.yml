@@ -85,13 +85,23 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Cache SPM
+      - name: Capture Xcode version
+        id: xcode
+        run: |
+          v=$(xcodebuild -version | tr '\n' '-' | sed 's/-$//')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Cache DerivedData (SPM checkouts + compiled build products)
         uses: actions/cache@v4
         with:
-          path: ~/Library/Developer/Xcode/DerivedData/**/SourcePackages
-          key: ${{ runner.os }}-spm-${{ hashFiles('ios/Spur/Spur.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          path: |
+            ~/Library/Developer/Xcode/DerivedData/Spur-*/SourcePackages
+            ~/Library/Developer/Xcode/DerivedData/Spur-*/Build/Products
+            ~/Library/Developer/Xcode/DerivedData/Spur-*/Build/Intermediates.noindex
+          key: ${{ runner.os }}-xcdd-${{ steps.xcode.outputs.version }}-${{ hashFiles('ios/Spur/Spur.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'ios/Spur/Spur.xcodeproj/project.pbxproj') }}
           restore-keys: |
-            ${{ runner.os }}-spm-
+            ${{ runner.os }}-xcdd-${{ steps.xcode.outputs.version }}-
+            ${{ runner.os }}-xcdd-
 
       - name: Install swift-format
         run: brew install swift-format
@@ -130,6 +140,8 @@ jobs:
             -project ios/Spur/Spur.xcodeproj \
             -scheme Spur \
             -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
-            -skip-testing:SpurUITests/SpurUITests/testLaunchPerformance \
+            -only-testing:SpurTests \
+            -parallelizeTargets \
+            -jobs $(sysctl -n hw.ncpu) \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO
