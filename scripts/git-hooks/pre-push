@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Local replacement for the iOS CI job. macOS GitHub runners bill at 10× Linux,
+# so iOS checks live here instead of .github/workflows/ci.yml. Bypass with
+# `git push --no-verify` when you knowingly need to skip.
+set -euo pipefail
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+merge_base=$(git merge-base HEAD origin/main 2>/dev/null || true)
+if [ -n "$merge_base" ] && git diff --quiet "$merge_base"..HEAD -- ios/; then
+  echo "pre-push: no ios/ changes since origin/main — skipping iOS checks"
+  exit 0
+fi
+
+if ! command -v swift-format >/dev/null 2>&1; then
+  echo "pre-push: swift-format not found — install with 'brew install swift-format'" >&2
+  exit 1
+fi
+
+echo "pre-push: swift-format lint"
+swift-format lint --strict --recursive ios
+
+if [ ! -f .spur-sim ]; then
+  echo "pre-push: .spur-sim missing in $repo_root" >&2
+  echo "  This worktree has no pinned simulator. See CLAUDE.md §Multi-session coordination." >&2
+  exit 1
+fi
+# shellcheck disable=SC1091
+source .spur-sim
+
+if [ -z "${SPUR_SIM_UDID:-}" ]; then
+  echo "pre-push: SPUR_SIM_UDID not set in .spur-sim" >&2
+  exit 1
+fi
+
+derived_data="${SPUR_DERIVED_DATA:-./.build/derived-data}"
+
+echo "pre-push: xcodebuild test (sim=${SPUR_SIM_NAME:-?} udid=$SPUR_SIM_UDID)"
+set -o pipefail
+xcodebuild test \
+  -project ios/Spur/Spur.xcodeproj \
+  -scheme Spur \
+  -destination "platform=iOS Simulator,id=$SPUR_SIM_UDID" \
+  -derivedDataPath "$derived_data" \
+  -only-testing:SpurTests \
+  -parallelizeTargets \
+  -jobs "$(sysctl -n hw.ncpu)" \
+  -skipPackagePluginValidation \
+  CODE_SIGNING_ALLOWED=NO
