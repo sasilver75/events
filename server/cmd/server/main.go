@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/sasilver75/events/server/internal/auth"
+	"github.com/sasilver75/events/server/internal/checkins"
 	"github.com/sasilver75/events/server/internal/commits"
 	"github.com/sasilver75/events/server/internal/events"
 )
@@ -49,6 +50,7 @@ func main() {
 
 	eventsHandler := events.New(pool)
 	commitsHandler := commits.New(pool)
+	checkinsHandler := checkins.New(pool)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -66,6 +68,7 @@ func main() {
 		r.Post("/events", eventsHandler.Create)
 		r.Post("/events/{id}/commit", commitsHandler.Commit)
 		r.Delete("/events/{id}/commit", commitsHandler.Withdraw)
+		r.Post("/events/{id}/checkin", checkinsHandler.CheckIn)
 	})
 
 	srv := &http.Server{

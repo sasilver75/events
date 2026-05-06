@@ -8,6 +8,7 @@ enum EventsAPI {
     case transport(String)
     case decode(String)
     case eventFull
+    case notAtEvent(distanceM: Double, accuracyM: Double)
 
     var errorDescription: String? {
       switch self {
@@ -16,6 +17,8 @@ enum EventsAPI {
       case .transport(let s): return s
       case .decode(let s): return "decode: \(s)"
       case .eventFull: return "This event is full"
+      case .notAtEvent:
+        return "You're too far from the pin to check in — get closer or check your GPS signal"
       }
     }
   }
@@ -127,6 +130,87 @@ enum EventsAPI {
     let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
     guard code == 201 else {
       throw APIError.http(code, String(data: data, encoding: .utf8) ?? "")
+    }
+  }
+
+  struct CheckIn: Decodable {
+    let recordedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+      case recordedAt = "recorded_at"
+    }
+  }
+
+  // checkIn POSTs the user's current GPS reading; the server applies the
+  // accuracy-aware geofence rule (ADR 0011). 409 not_at_event surfaces as
+  // APIError.notAtEvent so the caller can show the canonical message.
+  static func checkIn(
+    eventID: String,
+    lat: Double,
+    lon: Double,
+    horizontalAccuracyM: Double,
+    auth: AuthModel
+  ) async throws -> CheckIn {
+    guard let token = await auth.accessToken() else { throw APIError.noToken }
+
+    let url = SupabaseConfig.serverURL
+      .appendingPathComponent("events")
+      .appendingPathComponent(eventID)
+      .appendingPathComponent("checkin")
+
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    struct Body: Encodable {
+      let lat: Double
+      let lon: Double
+      let horizontal_accuracy_m: Double
+    }
+    do {
+      req.httpBody = try JSONEncoder().encode(
+        Body(lat: lat, lon: lon, horizontal_accuracy_m: horizontalAccuracyM))
+    } catch {
+      throw APIError.transport("encode body: \(error.localizedDescription)")
+    }
+
+    let data: Data
+    let resp: URLResponse
+    do {
+      (data, resp) = try await URLSession.shared.data(for: req)
+    } catch {
+      throw APIError.transport(error.localizedDescription)
+    }
+
+    let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+    if code == 409 {
+      struct NotAtEventBody: Decodable {
+        let error: String
+        let distanceM: Double
+        let accuracyM: Double
+
+        enum CodingKeys: String, CodingKey {
+          case error
+          case distanceM = "distance_m"
+          case accuracyM = "accuracy_m"
+        }
+      }
+      if let body = try? JSONDecoder().decode(NotAtEventBody.self, from: data),
+        body.error == "not_at_event"
+      {
+        throw APIError.notAtEvent(distanceM: body.distanceM, accuracyM: body.accuracyM)
+      }
+    }
+    guard code == 200 else {
+      throw APIError.http(code, String(data: data, encoding: .utf8) ?? "")
+    }
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601withFractionalSeconds
+    do {
+      return try decoder.decode(CheckIn.self, from: data)
+    } catch {
+      throw APIError.decode(error.localizedDescription)
     }
   }
 

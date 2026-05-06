@@ -1,3 +1,4 @@
+import CoreLocation
 import SwiftUI
 
 struct EventDetailSheet: View {
@@ -10,6 +11,10 @@ struct EventDetailSheet: View {
   @State private var committedByMe: Bool
   @State private var inFlight = false
   @State private var errorMessage: String?
+
+  @State private var checkedIn = false
+  @State private var checkInInFlight = false
+  @State private var checkInError: String?
 
   init(
     event: NearbyEvent,
@@ -33,6 +38,14 @@ struct EventDetailSheet: View {
             Text(errorMessage)
               .font(.footnote)
               .foregroundStyle(.red)
+          }
+          if showCheckIn {
+            checkInButton
+            if let checkInError {
+              Text(checkInError)
+                .font(.footnote)
+                .foregroundStyle(.red)
+            }
           }
           Divider()
           description
@@ -117,6 +130,31 @@ struct EventDetailSheet: View {
     return committedByMe ? "Withdraw" : "Commit"
   }
 
+  // The check-in row is only meaningful for a Committed Attendee on a
+  // Live Event — both must be true. Once `checkedIn` flips after a
+  // successful tap, the row stays visible as a confirmation.
+  private var showCheckIn: Bool {
+    committedByMe && event.state == "Live"
+  }
+
+  private var checkInButton: some View {
+    Button(action: { Task { await tapCheckIn() } }) {
+      HStack {
+        if checkInInFlight {
+          ProgressView().controlSize(.small)
+        }
+        Image(systemName: checkedIn ? "checkmark.circle.fill" : "mappin.and.ellipse")
+        Text(checkedIn ? "Checked in" : "I'm here")
+          .font(.headline)
+      }
+      .frame(maxWidth: .infinity, minHeight: 44)
+    }
+    .buttonStyle(.bordered)
+    .tint(checkedIn ? .green : .accentColor)
+    .disabled(checkInInFlight || checkedIn)
+    .accessibilityIdentifier("eventDetail.checkInButton")
+  }
+
   private var description: some View {
     VStack(alignment: .leading, spacing: 8) {
       Text("About")
@@ -171,6 +209,36 @@ struct EventDetailSheet: View {
       commitCount = priorCount
       committedByMe = priorCommitted
       errorMessage = error.localizedDescription
+    }
+  }
+
+  // tapCheckIn pulls a one-shot best-accuracy GPS fix and posts it; the
+  // server applies the accuracy-aware geofence (ADR 0011). Optimistic
+  // toggle on tap; revert on rejection. The probe is recreated each tap
+  // so a stale delegate from a prior fix never resolves the new
+  // continuation.
+  private func tapCheckIn() async {
+    checkInInFlight = true
+    checkInError = nil
+    let priorChecked = checkedIn
+    checkedIn = true
+    defer { checkInInFlight = false }
+
+    do {
+      let probe = CheckInLocationProbe()
+      let fix = try await probe.requestFix()
+      _ = try await EventsAPI.checkIn(
+        eventID: event.id,
+        lat: fix.coordinate.latitude,
+        lon: fix.coordinate.longitude,
+        horizontalAccuracyM: fix.horizontalAccuracy,
+        auth: auth)
+    } catch let error as EventsAPI.APIError {
+      checkedIn = priorChecked
+      checkInError = error.errorDescription
+    } catch {
+      checkedIn = priorChecked
+      checkInError = error.localizedDescription
     }
   }
 
