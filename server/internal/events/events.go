@@ -47,6 +47,7 @@ type nearbyEvent struct {
 	Cap           *int      `json:"cap"`
 	CommitCount   int       `json:"commit_count"`
 	CommittedByMe bool      `json:"committed_by_me"`
+	State         string    `json:"state"`
 }
 
 // Near handles GET /events?near=lat,lon&radius_m=…
@@ -100,7 +101,8 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 			END AS lon,
 			e.cap,
 			(SELECT count(*) FROM public.commits cc WHERE cc.event_id = e.id) AS commit_count,
-			(c.user_id IS NOT NULL) AS committed_by_me
+			(c.user_id IS NOT NULL) AS committed_by_me,
+			public.event_state(e) AS state
 		FROM public.events e
 		LEFT JOIN public.commits c
 			ON c.event_id = e.id AND c.user_id = $3
@@ -124,7 +126,7 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 		var e nearbyEvent
 		if err := rows.Scan(
 			&e.ID, &e.Title, &e.Description, &e.Category, &e.StartTime,
-			&e.Lat, &e.Lon, &e.Cap, &e.CommitCount, &e.CommittedByMe,
+			&e.Lat, &e.Lon, &e.Cap, &e.CommitCount, &e.CommittedByMe, &e.State,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan: "+err.Error())
 			return

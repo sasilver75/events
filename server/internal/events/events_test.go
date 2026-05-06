@@ -35,6 +35,7 @@ type nearbyEvent struct {
 	Cap           *int      `json:"cap"`
 	CommitCount   int       `json:"commit_count"`
 	CommittedByMe bool      `json:"committed_by_me"`
+	State         string    `json:"state"`
 }
 
 func TestNearbyEventsEndpoint(t *testing.T) {
@@ -111,6 +112,15 @@ func TestNearbyEventsEndpoint(t *testing.T) {
 		}
 		if len(body) < 3 {
 			t.Errorf("expected ≥3 events, got %d", len(body))
+		}
+		validStates := map[string]bool{
+			"Open": true, "Filling": true, "Tipped": true,
+			"Live": true, "Done": true, "Cancelled": true,
+		}
+		for _, e := range body {
+			if !validStates[e.State] {
+				t.Errorf("event %s: state %q is not one of the six valid values", e.ID, e.State)
+			}
 		}
 	})
 
