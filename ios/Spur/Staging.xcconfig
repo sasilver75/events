@@ -1,0 +1,21 @@
+// Hosted spur-staging Supabase config (per ADR 0014).
+//
+// Used by Release builds via project Spur → Info → Configurations → Release.
+// Debug remains on Local.xcconfig.
+//
+// Anon (publishable) key is committed deliberately — Supabase markets it as
+// client-safe. Service-role key never appears in any xcconfig. Twilio Verify
+// credentials live exclusively in the hosted Supabase Auth dashboard.
+//
+// `//` is the xcconfig comment marker, so URLs use the `$()` escape between
+// the colon and the double-slash to keep the parser from eating the rest of
+// the line.
+
+SUPABASE_URL = https:/$()/kvuitlxjtcvjdimfojlf.supabase.co
+SUPABASE_ANON_KEY = sb_publishable_NsM_EsYvG-8WUkd9lMvwnw_d4NBHmEQ
+
+// Go server is still local in v0 — ADR 0005/0015 keep it off Fly until first
+// non-self user. Phase 3's /me probe runs against localhost.
+SERVER_URL = http:/$()/127.0.0.1:8080
+
+INFOPLIST_FILE = Spur-Info.plist

@@ -33,6 +33,7 @@
 		D79754A82FA9E0B200AFDFB6 /* SpurTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SpurTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D79754B22FA9E0B200AFDFB6 /* SpurUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SpurUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D79754EE2FAA9A2E00AFDFB6 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
+		D79754EF2FAA9A2E00AFDFB6 /* Staging.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Staging.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -89,6 +90,7 @@
 				D79754CA2FA9E4A600AFDFB6 /* Frameworks */,
 				D797549C2FA9E0B200AFDFB6 /* Products */,
 				D79754EE2FAA9A2E00AFDFB6 /* Local.xcconfig */,
+				D79754EF2FAA9A2E00AFDFB6 /* Staging.xcconfig */,
 			);
 			sourceTree = "<group>";
 		};
@@ -358,7 +360,7 @@
 		};
 		D79754BB2FA9E0B200AFDFB6 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = D79754EE2FAA9A2E00AFDFB6 /* Local.xcconfig */;
+			baseConfigurationReference = D79754EF2FAA9A2E00AFDFB6 /* Staging.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
