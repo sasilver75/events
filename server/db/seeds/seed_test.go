@@ -158,10 +158,7 @@ func countFuzzedWithDisplayWithinRadius(ctx context.Context, t *testing.T, dbURL
 		   AND location_visibility = 'fuzzed'
 		   AND display_geom IS NOT NULL
 		   AND fuzz_radius_m IS NOT NULL
-		   AND ST_DistanceSphere(
-		       display_geom,
-		       ST_SetSRID(ST_MakePoint(center_lon, center_lat), 4326)
-		   ) <= fuzz_radius_m`,
+		   AND ST_DistanceSphere(display_geom, geom) <= fuzz_radius_m`,
 	).Scan(&n); err != nil {
 		t.Fatalf("count fuzzed-within-radius: %v", err)
 	}

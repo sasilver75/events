@@ -49,11 +49,11 @@ struct EventDetailSheet: View {
     HStack(spacing: 24) {
       metaCell(
         icon: "calendar",
-        primary: Self.dateLine(event.startAt),
-        secondary: Self.timeLine(event.startAt))
+        primary: Self.dateLine(event.startTime),
+        secondary: Self.timeLine(event.startTime))
       metaCell(
         icon: "person.2.fill",
-        primary: "\(event.commitCount) / \(event.cap)",
+        primary: event.cap.map { "\(event.commitCount) / \($0)" } ?? "\(event.commitCount)",
         secondary: "Committed")
     }
   }

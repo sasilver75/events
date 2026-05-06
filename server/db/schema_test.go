@@ -82,14 +82,14 @@ func TestSchemaBaseline(t *testing.T) {
 				SELECT 1 FROM pg_indexes
 				WHERE schemaname='public'
 				  AND tablename='events'
-				  AND indexname='events_geog_idx'
+				  AND indexname='events_geom_geog_idx'
 			)
 		`).Scan(&ok)
 		if err != nil {
 			t.Fatalf("query: %v", err)
 		}
 		if !ok {
-			t.Error("events_geog_idx not found")
+			t.Error("events_geom_geog_idx not found")
 		}
 	})
 }

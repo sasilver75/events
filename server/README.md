@@ -170,6 +170,22 @@ wired in by issues #4 / #7 / #9. The full disposition (which value is
 public vs secret, and where each lives in each environment) is in
 [ADR 0014](../docs/adr/0014-secret-management.md).
 
+## Wave-2 known limitations
+
+The α-Event creation slice (issue #29) ships these affordances; the items
+below are deliberately out of scope and arrive in later slices:
+
+- **β-Events / Tip threshold** — α only for now. Seeded β-Events with a Tip
+  binding land in #32.
+- **Edits post-creation** — `POST /events` is the only write today. Title,
+  description, Cap (loosen-only), and gating rules (loosen-only) become
+  editable pre-Live in a later slice (PRD §Lifecycle).
+- **Cancel** — Hosts cannot cancel an α-Event in v0; the Event runs to
+  `end_time` and is excluded from Browse afterward.
+- **Rep-gating (`rep ≥ X`)** — carved out to #38; depends on the
+  `reputation` table from #35.
+- **Friends-only gating** — depends on the friend system; not yet sliced.
+
 ## Deploy-order discipline
 
 Schema and code can drift in time because migrations run as a separate step

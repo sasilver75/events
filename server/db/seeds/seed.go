@@ -67,12 +67,14 @@ func upsertCuratedEvent(ctx context.Context, conn *pgx.Conn, hostID string, e Cu
 	// observer triangulate the true center.
 	_, err := conn.Exec(ctx, `
 		INSERT INTO public.events (
-			host_user_id, title, description, category,
-			start_at, duration_minutes, cap,
-			center_lat, center_lon, source, seed_key,
+			host_id, title, description, category,
+			start_time, end_time, cap,
+			geom, source, seed_key,
 			location_visibility, fuzz_radius_m, display_geom
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, 'curated', $10,
+			$1, $2, $3, $4, $5, $6, $7,
+			ST_SetSRID(ST_MakePoint($8, $9), 4326),
+			'curated', $10,
 			$11, $12,
 			CASE WHEN $13::float8 IS NULL OR $14::float8 IS NULL
 			     THEN NULL
@@ -80,22 +82,21 @@ func upsertCuratedEvent(ctx context.Context, conn *pgx.Conn, hostID string, e Cu
 			END
 		)
 		ON CONFLICT (seed_key) DO UPDATE SET
-			host_user_id        = EXCLUDED.host_user_id,
+			host_id             = EXCLUDED.host_id,
 			title               = EXCLUDED.title,
 			description         = EXCLUDED.description,
 			category            = EXCLUDED.category,
-			start_at            = EXCLUDED.start_at,
-			duration_minutes    = EXCLUDED.duration_minutes,
+			start_time          = EXCLUDED.start_time,
+			end_time            = EXCLUDED.end_time,
 			cap                 = EXCLUDED.cap,
-			center_lat          = EXCLUDED.center_lat,
-			center_lon          = EXCLUDED.center_lon,
+			geom                = EXCLUDED.geom,
 			location_visibility = EXCLUDED.location_visibility,
 			fuzz_radius_m       = COALESCE(public.events.fuzz_radius_m, EXCLUDED.fuzz_radius_m),
 			display_geom        = COALESCE(public.events.display_geom, EXCLUDED.display_geom)
 	`,
 		hostID, e.Title, e.Description, e.Category,
-		e.StartAt, e.DurationMinutes, e.Cap,
-		e.CenterLat, e.CenterLon, e.SeedKey,
+		e.StartTime, e.EndTime, e.Cap,
+		e.CenterLon, e.CenterLat, e.SeedKey,
 		e.LocationVisibility, e.FuzzRadiusM,
 		e.DisplayLon, e.DisplayLat,
 	)

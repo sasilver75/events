@@ -10,15 +10,15 @@ struct NearbyEvent: Decodable, Identifiable, Hashable {
   let title: String
   let description: String
   let category: String
-  let startAt: Date
+  let startTime: Date
   let lat: Double
   let lon: Double
-  let cap: Int
+  let cap: Int?
   let commitCount: Int
 
   enum CodingKeys: String, CodingKey {
     case id, title, description, category
-    case startAt = "start_at"
+    case startTime = "start_time"
     case lat, lon, cap
     case commitCount = "commit_count"
   }
