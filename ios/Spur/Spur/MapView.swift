@@ -11,10 +11,10 @@ struct MapView: UIViewRepresentable {
   var heading: CLLocationDirection = 0
   var events: [NearbyEvent] = []
   var onSelect: (NearbyEvent) -> Void = { _ in }
-  var onCenterChange: (CLLocationCoordinate2D) -> Void = { _ in }
+  var centerBinding: Binding<CLLocationCoordinate2D>?
 
   func makeCoordinator() -> Coordinator {
-    Coordinator(onSelect: onSelect, onCenterChange: onCenterChange)
+    Coordinator(onSelect: onSelect, centerBinding: centerBinding)
   }
 
   func makeUIView(context: Context) -> MLNMapView {
@@ -34,7 +34,7 @@ struct MapView: UIViewRepresentable {
 
   func updateUIView(_ uiView: MLNMapView, context: Context) {
     context.coordinator.onSelect = onSelect
-    context.coordinator.onCenterChange = onCenterChange
+    context.coordinator.centerBinding = centerBinding
     context.coordinator.sync(events: events, on: uiView)
   }
 
@@ -53,15 +53,15 @@ struct MapView: UIViewRepresentable {
 
   final class Coordinator: NSObject, MLNMapViewDelegate {
     var onSelect: (NearbyEvent) -> Void
-    var onCenterChange: (CLLocationCoordinate2D) -> Void
+    var centerBinding: Binding<CLLocationCoordinate2D>?
     private var byID: [String: EventAnnotation] = [:]
 
     init(
       onSelect: @escaping (NearbyEvent) -> Void,
-      onCenterChange: @escaping (CLLocationCoordinate2D) -> Void
+      centerBinding: Binding<CLLocationCoordinate2D>?
     ) {
       self.onSelect = onSelect
-      self.onCenterChange = onCenterChange
+      self.centerBinding = centerBinding
     }
 
     func sync(events: [NearbyEvent], on mapView: MLNMapView) {
@@ -131,7 +131,7 @@ struct MapView: UIViewRepresentable {
     }
 
     func mapView(_ mapView: MLNMapView, regionDidChangeAnimated animated: Bool) {
-      onCenterChange(mapView.centerCoordinate)
+      centerBinding?.wrappedValue = mapView.centerCoordinate
     }
 
     // pinImage renders a category-tinted circle with the SF Symbol icon

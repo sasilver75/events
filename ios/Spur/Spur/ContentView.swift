@@ -12,10 +12,19 @@ struct ContentView: View {
 
   @State private var showingPermissionPrompt = false
   @State private var showingAttribution = false
-  @State private var showingCreateSheet = false
   @State private var probeResult: String?
   @State private var probeRunning = false
   @State private var viewportCenter: CLLocationCoordinate2D = Self.losAngeles
+  @State private var createSheetRequest: CreateSheetRequest?
+
+  // Identifiable wrapper so .sheet(item:) carries the chosen center alongside
+  // the present-sheet trigger — bypasses the SwiftUI transaction race where
+  // setting two sibling @State values (a flag + a payload) in one button
+  // action can present the sheet with a stale payload.
+  private struct CreateSheetRequest: Identifiable {
+    let id = UUID()
+    let center: CLLocationCoordinate2D
+  }
 
   // 50 km from the requested center comfortably covers LA metro at v0 scale,
   // so a single fetch on map appear is enough — no viewport-based refetch
@@ -31,7 +40,7 @@ struct ContentView: View {
         zoom: 11,
         events: events,
         onSelect: { selectedEvent = $0 },
-        onCenterChange: { viewportCenter = $0 }
+        centerBinding: $viewportCenter
       )
       .ignoresSafeArea()
 
@@ -77,9 +86,9 @@ struct ContentView: View {
     .sheet(item: $selectedEvent) { event in
       EventDetailSheet(event: event)
     }
-    .sheet(isPresented: $showingCreateSheet) {
+    .sheet(item: $createSheetRequest) { request in
       CreateEventSheet(
-        initialCenter: viewportCenter,
+        initialCenter: request.center,
         onCreated: { Task { await refetchAfterCreate() } })
     }
     .alert(
@@ -112,7 +121,7 @@ struct ContentView: View {
       Spacer()
 
       Button {
-        showingCreateSheet = true
+        createSheetRequest = CreateSheetRequest(center: viewportCenter)
       } label: {
         Image(systemName: "plus")
           .font(.title2)
