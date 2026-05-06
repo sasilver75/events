@@ -15,21 +15,23 @@ struct ContentView: View {
   @State private var showingCreateSheet = false
   @State private var probeResult: String?
   @State private var probeRunning = false
+  @State private var viewportCenter: CLLocationCoordinate2D = Self.losAngeles
 
   // 50 km from the requested center comfortably covers LA metro at v0 scale,
   // so a single fetch on map appear is enough — no viewport-based refetch
   // until the app expands beyond LA. See issue #10 plan for the deferral.
   private let fetchRadiusM = 50_000
-  private let losAngeles = CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437)
+  private static let losAngeles = CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437)
 
   var body: some View {
     ZStack(alignment: .top) {
       MapView(
         styleURL: Bundle.main.mapStyleLightURL,
-        center: losAngeles,
+        center: Self.losAngeles,
         zoom: 11,
         events: events,
-        onSelect: { selectedEvent = $0 }
+        onSelect: { selectedEvent = $0 },
+        onCenterChange: { viewportCenter = $0 }
       )
       .ignoresSafeArea()
 
@@ -77,7 +79,7 @@ struct ContentView: View {
     }
     .sheet(isPresented: $showingCreateSheet) {
       CreateEventSheet(
-        initialCenter: losAngeles,
+        initialCenter: viewportCenter,
         onCreated: { Task { await refetchAfterCreate() } })
     }
     .alert(
@@ -203,7 +205,7 @@ struct ContentView: View {
 
   private func fetchWithFallback() async {
     guard !hasFetched else { return }
-    await fetch(near: losAngeles)
+    await fetch(near: Self.losAngeles)
   }
 
   private func fetch(near coord: CLLocationCoordinate2D) async {
@@ -220,7 +222,7 @@ struct ContentView: View {
   }
 
   private func refetchAfterCreate() async {
-    await fetch(near: location.lastFix ?? losAngeles)
+    await fetch(near: location.lastFix ?? Self.losAngeles)
   }
 
   // MARK: dev probe
