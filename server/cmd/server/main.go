@@ -13,8 +13,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/sasilver75/events/server/internal/auth"
+	"github.com/sasilver75/events/server/internal/events"
 )
 
 func main() {
@@ -27,12 +29,24 @@ func main() {
 	if supabaseURL == "" {
 		log.Fatalf("SUPABASE_URL must be set")
 	}
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatalf("DATABASE_URL must be set")
+	}
 
 	ctx := context.Background()
 	verifier, err := auth.NewVerifier(ctx, supabaseURL)
 	if err != nil {
 		log.Fatalf("auth verifier: %v", err)
 	}
+
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		log.Fatalf("db pool: %v", err)
+	}
+	defer pool.Close()
+
+	eventsHandler := events.New(pool)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -46,6 +60,7 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(verifier.Middleware)
 		r.Get("/me", auth.Me)
+		r.Get("/events", eventsHandler.Near)
 	})
 
 	srv := &http.Server{

@@ -39,6 +39,12 @@ the right length — link out for depth.
   thoroughly enough that an agent can finish it unsupervised. Contrast
   HITL.
 
+- **Annotation** — A point on a map view that marks a place (e.g.
+  the pin for an Event). MapKit and MapLibre Native both call these
+  "annotations" — the noun covers both the data (`MLNAnnotation`,
+  carrying coordinate + payload) and its on-screen rendering. Spur
+  uses one Annotation per Event on the Browse map.
+
 - **Anon key** — Supabase's client-safe API key (also marketed as
   "publishable key"). Different from the service-role key, which
   bypasses RLS and must stay server-side. Per
@@ -56,6 +62,13 @@ the right length — link out for depth.
 - **Carrier** — A mobile network operator (Verizon, AT&T, T-Mobile in
   the US). Carriers enforce A2P 10DLC and other SMS-deliverability
   rules.
+
+- **Callout** — The small popup balloon that appears above an
+  Annotation when it's tapped on a map (Apple Maps shows a name +
+  chevron tile, for example). MapLibre Native shows a built-in
+  callout when an annotation has a non-nil `title`; Spur opts out
+  via `mapView(_:annotationCanShowCallout:)` and goes straight from
+  pin tap to a SwiftUI bottom-sheet.
 
 - **Carrier registration** — The process of submitting a brand
   identity + use-case description ("campaign") to The Campaign

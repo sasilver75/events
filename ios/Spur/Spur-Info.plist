@@ -13,5 +13,7 @@
         <key>NSAllowsLocalNetworking</key>
         <true/>
     </dict>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Spur uses your location to show Events happening near you.</string>
 </dict>
 </plist>
