@@ -13,7 +13,12 @@
 // the colon and the double-slash to keep the parser from eating the rest of
 // the line.
 
-SUPABASE_URL = http:/$()/127.0.0.1:54321
+// Per-worktree values (today: SUPABASE_URL pinned to the worktree's Supabase
+// API port) live in Local.generated.xcconfig, rendered by
+// scripts/spur-services-init.sh from Local.generated.xcconfig.template.
+// Mandatory include — if the build fails here, run the init script.
+#include "Local.generated.xcconfig"
+
 SUPABASE_ANON_KEY = sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
 SERVER_URL = http:/$()/127.0.0.1:8080
 

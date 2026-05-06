@@ -16,7 +16,9 @@
 #   4. Renders supabase/config.toml from supabase/config.toml.template with
 #      port placeholders substituted and project_id set to the worktree's
 #      directory name (so docker container names are also unique).
-#   5. Writes .spur-services with the resolved offset, project_id, and
+#   5. Renders ios/Spur/Local.generated.xcconfig from its template so the
+#      iOS build picks up the worktree's Supabase API port.
+#   6. Writes .spur-services with the resolved offset, project_id, and
 #      per-service URLs (sourceable as env).
 #
 # Idempotent — re-running is a no-op when .spur-services already exists.
@@ -30,6 +32,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PIN="$ROOT/.spur-services"
 TEMPLATE="$ROOT/supabase/config.toml.template"
 CONFIG="$ROOT/supabase/config.toml"
+IOS_TEMPLATE="$ROOT/ios/Spur/Local.generated.xcconfig.template"
+IOS_CONFIG="$ROOT/ios/Spur/Local.generated.xcconfig"
 
 FORCE=0
 for arg in "$@"; do
@@ -46,6 +50,11 @@ fi
 
 if [ ! -f "$TEMPLATE" ]; then
   echo "missing template: $TEMPLATE" >&2
+  exit 1
+fi
+
+if [ ! -f "$IOS_TEMPLATE" ]; then
+  echo "missing template: $IOS_TEMPLATE" >&2
   exit 1
 fi
 
@@ -131,6 +140,10 @@ sed \
   -e "s/__SPUR_EDGE_INSPECTOR_PORT__/$EDGE_INSPECTOR_PORT/g" \
   "$TEMPLATE" > "$CONFIG"
 
+sed \
+  -e "s/__SPUR_API_PORT__/$API_PORT/g" \
+  "$IOS_TEMPLATE" > "$IOS_CONFIG"
+
 cat > "$PIN" <<EOF
 # Per-worktree services pin. Source this file (or read it programmatically)
 # to point shells, tests, and Make targets at the worktree's isolated
@@ -152,5 +165,6 @@ echo "  Supabase API:      http://127.0.0.1:$API_PORT"
 echo "  Supabase DB:       postgresql://postgres:postgres@127.0.0.1:$DB_PORT/postgres"
 echo "  Supabase Studio:   http://127.0.0.1:$STUDIO_PORT"
 echo "  Supabase Inbucket: http://127.0.0.1:$INBUCKET_PORT"
+echo "  iOS Local.generated.xcconfig: SUPABASE_URL → http://127.0.0.1:$API_PORT"
 echo
 echo "Next: cd $ROOT && supabase start"
