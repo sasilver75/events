@@ -177,7 +177,12 @@ The Wave-1 server slices (Browse #10, α-Event creation #29, Commit/Withdraw
 and arrives in later slices:
 
 - **β-Events / Tip threshold** — α only for now. Seeded β-Events with a Tip
-  binding land in #32.
+  binding land in #32. The `events.tipped_at` column exists from #31 so
+  `event_state()` can read it, but no code path writes it yet — `'Tipped'`
+  is unreachable in production data until #32 lands.
+- **Cancel writes** — the `events.cancelled_at` column exists from #31 so
+  `event_state()` can return `'Cancelled'`, but no code path writes it yet.
+  β auto-cancel lands in #32; Host α-cancel is deferred per §Cancel below.
 - **Live state and check-in** — Commit/Withdraw is unconditional in Wave 1
   (PRD US 23). Live transition + Flake-aware Withdraw + check-in arrive
   with #33+.
