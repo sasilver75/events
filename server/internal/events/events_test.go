@@ -30,6 +30,7 @@ type nearbyEvent struct {
 	Description   string    `json:"description"`
 	Category      string    `json:"category"`
 	StartTime     time.Time `json:"start_time"`
+	EndTime       time.Time `json:"end_time"`
 	Lat           float64   `json:"lat"`
 	Lon           float64   `json:"lon"`
 	Cap           *int      `json:"cap"`
@@ -131,6 +132,68 @@ func TestNearbyEventsEndpoint(t *testing.T) {
 		}
 		if rec.Body.String() != "[]\n" {
 			t.Errorf("expected empty JSON array, got %q", rec.Body.String())
+		}
+	})
+
+	t.Run("bad from returns 400", func(t *testing.T) {
+		rec, _ := get(t, "near=34.0522,-118.2437&from=not-a-time")
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("to <= from returns 400", func(t *testing.T) {
+		from := time.Now().UTC().Format(time.RFC3339)
+		to := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+		rec, _ := get(t, fmt.Sprintf("near=34.0522,-118.2437&from=%s&to=%s", from, to))
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("event outside window is excluded", func(t *testing.T) {
+		farID := insertWindowSeedEvent(ctx, t, pool, 60*time.Hour, 61*time.Hour)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, `DELETE FROM public.events WHERE id = $1`, farID)
+		})
+
+		toClose := time.Now().UTC().Add(5 * time.Hour).Format(time.RFC3339)
+		_, body := get(t, "near=34.0522,-118.2437&radius_m=30000&to="+toClose)
+		for _, e := range body {
+			if e.ID == farID {
+				t.Errorf("event 60h out should be excluded by to=%s", toClose)
+			}
+		}
+	})
+
+	t.Run("event in progress is included when its end is after from", func(t *testing.T) {
+		// start 30 min ago, end 30 min from now: a Live event.
+		liveID := insertWindowSeedEvent(ctx, t, pool, -30*time.Minute, 30*time.Minute)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, `DELETE FROM public.events WHERE id = $1`, liveID)
+		})
+
+		// Window starting "now": event started before from, but end > from.
+		fromNow := time.Now().UTC().Format(time.RFC3339)
+		_, body := get(t, "near=34.0522,-118.2437&radius_m=30000&from="+fromNow)
+		var seen bool
+		for _, e := range body {
+			if e.ID == liveID {
+				seen = true
+			}
+		}
+		if !seen {
+			t.Errorf("Live event should overlap window from=%s", fromNow)
+		}
+	})
+
+	t.Run("response includes end_time", func(t *testing.T) {
+		_, body := get(t, "near=34.0522,-118.2437&radius_m=30000")
+		if len(body) == 0 {
+			t.Fatalf("no events returned")
+		}
+		if body[0].EndTime.IsZero() {
+			t.Errorf("end_time missing from response")
 		}
 	})
 
@@ -304,6 +367,39 @@ func requireSeedEvents(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	if n < 3 {
 		t.Fatalf("need ≥3 curated events; run `make seed` first (got %d)", n)
 	}
+}
+
+// insertWindowSeedEvent creates a curated event with start/end offsets
+// relative to now, returning its id. Useful for time-filter tests.
+func insertWindowSeedEvent(
+	ctx context.Context, t *testing.T, pool *pgxpool.Pool,
+	startOffset, endOffset time.Duration,
+) string {
+	t.Helper()
+	var hostID string
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM public.users WHERE display_name = 'Spur Seed' LIMIT 1`,
+	).Scan(&hostID); err != nil {
+		t.Fatalf("find spur-seed host: %v", err)
+	}
+	now := time.Now().UTC()
+	var id string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO public.events (
+			host_id, title, description, category,
+			start_time, end_time, cap,
+			geom, source, location_visibility
+		) VALUES (
+			$1, 'window event', 'window event', 'Other',
+			$2, $3, 4,
+			ST_SetSRID(ST_MakePoint(-118.2437, 34.0522), 4326),
+			'curated', 'public'
+		) RETURNING id
+	`, hostID, now.Add(startOffset), now.Add(endOffset)).Scan(&id)
+	if err != nil {
+		t.Fatalf("insert window event: %v", err)
+	}
+	return id
 }
 
 // insertPastSeedEvent creates a curated event whose end_time is already in

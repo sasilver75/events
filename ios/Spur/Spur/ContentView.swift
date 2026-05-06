@@ -16,6 +16,10 @@ struct ContentView: View {
   @State private var probeRunning = false
   @State private var viewportCenter: CLLocationCoordinate2D = Self.losAngeles
   @State private var createSheetRequest: CreateSheetRequest?
+  @State private var hoursAhead: Double = Self.maxHoursAhead
+  @State private var sliderRefetchTask: Task<Void, Never>?
+
+  private static let maxHoursAhead: Double = 72
 
   // Identifiable wrapper so .sheet(item:) carries the chosen center alongside
   // the present-sheet trigger — bypasses the SwiftUI transaction race where
@@ -52,6 +56,18 @@ struct ContentView: View {
 
       if let err = fetchError {
         errorBanner(err)
+      }
+
+      VStack {
+        Spacer()
+        TimeWindowSlider(
+          hoursAhead: $hoursAhead,
+          maxHours: Self.maxHoursAhead,
+          onEditingChanged: { editing in
+            if !editing { scheduleSliderRefetch() }
+          }
+        )
+        .padding(.bottom, 24)
       }
     }
     .task {
@@ -223,12 +239,18 @@ struct ContentView: View {
   }
 
   private func fetch(near coord: CLLocationCoordinate2D) async {
+    let now = Date()
+    let to = now.addingTimeInterval(hoursAhead * 3600)
     do {
       let result = try await EventsAPI.fetchNearby(
-        near: coord, radiusM: fetchRadiusM, auth: auth)
+        near: coord, radiusM: fetchRadiusM, from: now, to: to, auth: auth)
       events = result
       fetchError = nil
       hasFetched = true
+    } catch is CancellationError {
+      return
+    } catch let urlErr as URLError where urlErr.code == .cancelled {
+      return
     } catch {
       fetchError = error.localizedDescription
       hasFetched = true
@@ -237,6 +259,20 @@ struct ContentView: View {
 
   private func refetchAfterCreate() async {
     await fetch(near: location.lastFix ?? Self.losAngeles)
+  }
+
+  private func refetchForWindow() async {
+    guard hasFetched else { return }
+    await fetch(near: location.lastFix ?? viewportCenter)
+  }
+
+  // Held in @State so the next slider release can cancel any in-flight
+  // fetch — without that, a fast re-drag races against the prior result.
+  private func scheduleSliderRefetch() {
+    sliderRefetchTask?.cancel()
+    sliderRefetchTask = Task {
+      await refetchForWindow()
+    }
   }
 
   // MARK: dev probe

@@ -11,6 +11,7 @@ struct NearbyEvent: Decodable, Identifiable, Hashable {
   let description: String
   let category: String
   let startTime: Date
+  let endTime: Date
   let lat: Double
   let lon: Double
   let cap: Int?
@@ -21,6 +22,7 @@ struct NearbyEvent: Decodable, Identifiable, Hashable {
   enum CodingKeys: String, CodingKey {
     case id, title, description, category
     case startTime = "start_time"
+    case endTime = "end_time"
     case lat, lon, cap
     case commitCount = "commit_count"
     case committedByMe = "committed_by_me"
@@ -32,4 +34,16 @@ struct NearbyEvent: Decodable, Identifiable, Hashable {
   }
 
   var categoryEnum: EventCategory { .from(category) }
+
+  enum Urgency {
+    case live
+    case soon
+    case later
+  }
+
+  func urgency(now: Date) -> Urgency {
+    if startTime <= now { return .live }
+    if startTime.timeIntervalSince(now) <= 2 * 60 * 60 { return .soon }
+    return .later
+  }
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,6 +21,12 @@ const (
 	defaultRadiusM = 10000
 	defaultFuzzM   = 200
 	maxStartWindow = 72 * time.Hour
+	defaultWindow  = 72 * time.Hour
+	// 50ms is the budget for the SQL+pgx leg of a discovery-feed query
+	// that fires on every UI gesture: end-to-end is sub-100ms (sub-1ms
+	// warm today), and anything slower than 50ms is signal — likely host
+	// resource starvation, a missing index, or a plan flip — not noise.
+	browseSlowThreshold = 50 * time.Millisecond
 )
 
 var validCategories = map[string]bool{
@@ -42,6 +49,7 @@ type nearbyEvent struct {
 	Description   string    `json:"description"`
 	Category      string    `json:"category"`
 	StartTime     time.Time `json:"start_time"`
+	EndTime       time.Time `json:"end_time"`
 	Lat           float64   `json:"lat"`
 	Lon           float64   `json:"lon"`
 	Cap           *int      `json:"cap"`
@@ -76,7 +84,13 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	from, to, err := parseWindow(r.URL.Query().Get("from"), r.URL.Query().Get("to"), time.Now())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
+	tQuery := time.Now()
 	// Geographic filter is on the *true* geom, not display_geom: a viewer
 	// "near" an Event should see it regardless of which pin we end up
 	// returning, otherwise non-Committed viewers near the true center would
@@ -89,6 +103,7 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 			e.description,
 			e.category,
 			e.start_time,
+			e.end_time,
 			CASE
 				WHEN e.location_visibility = 'public' OR c.user_id IS NOT NULL
 					THEN ST_Y(e.geom)
@@ -113,8 +128,10 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 				$4
 			)
 			AND e.end_time > now()
+			AND e.start_time < $6
+			AND e.end_time > $5
 		ORDER BY e.start_time ASC
-	`, lat, lon, userID, radiusM)
+	`, lat, lon, userID, radiusM, from, to)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query events: "+err.Error())
 		return
@@ -125,7 +142,7 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var e nearbyEvent
 		if err := rows.Scan(
-			&e.ID, &e.Title, &e.Description, &e.Category, &e.StartTime,
+			&e.ID, &e.Title, &e.Description, &e.Category, &e.StartTime, &e.EndTime,
 			&e.Lat, &e.Lon, &e.Cap, &e.CommitCount, &e.CommittedByMe, &e.State,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan: "+err.Error())
@@ -136,6 +153,10 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "rows: "+err.Error())
 		return
+	}
+	if dur := time.Since(tQuery); dur > browseSlowThreshold {
+		log.Printf("near: slow query %s (rows=%d, threshold=%s) — investigate pool/host/plan",
+			dur, len(out), browseSlowThreshold)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -305,6 +326,31 @@ func parseNear(raw string) (lat, lon float64, err error) {
 		return 0, 0, errors.New("near lon out of range [-180, 180]")
 	}
 	return lat, lon, nil
+}
+
+// parseWindow defaults missing bounds to [now, now+72h]. RFC3339 only —
+// invalid input returns 400 to keep client/server time formats locked down.
+func parseWindow(rawFrom, rawTo string, now time.Time) (time.Time, time.Time, error) {
+	from := now
+	to := now.Add(defaultWindow)
+	if rawFrom != "" {
+		t, err := time.Parse(time.RFC3339, rawFrom)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("from: %w", err)
+		}
+		from = t
+	}
+	if rawTo != "" {
+		t, err := time.Parse(time.RFC3339, rawTo)
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("to: %w", err)
+		}
+		to = t
+	}
+	if !to.After(from) {
+		return time.Time{}, time.Time{}, errors.New("to must be after from")
+	}
+	return from, to, nil
 }
 
 func parseRadius(raw string) (int, error) {

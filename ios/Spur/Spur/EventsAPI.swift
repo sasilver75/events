@@ -36,6 +36,8 @@ enum EventsAPI {
   static func fetchNearby(
     near: CLLocationCoordinate2D,
     radiusM: Int,
+    from: Date? = nil,
+    to: Date? = nil,
     auth: AuthModel
   ) async throws -> [NearbyEvent] {
     guard let token = await auth.accessToken() else { throw APIError.noToken }
@@ -44,10 +46,15 @@ enum EventsAPI {
       url: SupabaseConfig.serverURL.appendingPathComponent("events"),
       resolvingAgainstBaseURL: false
     )!
-    components.queryItems = [
+    let rfc = ISO8601DateFormatter()
+    rfc.formatOptions = [.withInternetDateTime]
+    var items: [URLQueryItem] = [
       URLQueryItem(name: "near", value: "\(near.latitude),\(near.longitude)"),
       URLQueryItem(name: "radius_m", value: String(radiusM)),
     ]
+    if let from { items.append(URLQueryItem(name: "from", value: rfc.string(from: from))) }
+    if let to { items.append(URLQueryItem(name: "to", value: rfc.string(from: to))) }
+    components.queryItems = items
 
     var req = URLRequest(url: components.url!)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -56,6 +63,8 @@ enum EventsAPI {
     let resp: URLResponse
     do {
       (data, resp) = try await URLSession.shared.data(for: req)
+    } catch let urlErr as URLError where urlErr.code == .cancelled {
+      throw CancellationError()
     } catch {
       throw APIError.transport(error.localizedDescription)
     }

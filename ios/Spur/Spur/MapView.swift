@@ -116,11 +116,12 @@ struct MapView: UIViewRepresentable {
     func mapView(_ mapView: MLNMapView, imageFor annotation: MLNAnnotation) -> MLNAnnotationImage? {
       guard let event = (annotation as? EventAnnotation)?.event else { return nil }
       let category = event.categoryEnum
-      let reuseID = "spur-pin-\(category.rawValue)"
+      let urgency = event.urgency(now: Date())
+      let reuseID = "spur-pin-\(category.rawValue)-\(urgency)"
       if let existing = mapView.dequeueReusableAnnotationImage(withIdentifier: reuseID) {
         return existing
       }
-      let image = Self.pinImage(for: category)
+      let image = Self.pinImage(for: category, urgency: urgency)
       return MLNAnnotationImage(image: image, reuseIdentifier: reuseID)
     }
 
@@ -144,14 +145,23 @@ struct MapView: UIViewRepresentable {
     // pinImage renders a category-tinted circle with the SF Symbol icon
     // centered on top, suitable for use as an MLNAnnotationImage. Drawn at
     // 3x for retina; MapLibre treats the image's size as logical points.
-    private static func pinImage(for category: EventCategory) -> UIImage {
+    private static func pinImage(
+      for category: EventCategory,
+      urgency: NearbyEvent.Urgency
+    ) -> UIImage {
       let diameter: CGFloat = 36
       let size = CGSize(width: diameter, height: diameter)
 
       let renderer = UIGraphicsImageRenderer(size: size)
+      let alpha: CGFloat = (urgency == .later) ? 0.55 : 1.0
 
       return renderer.image { ctx in
         let rect = CGRect(origin: .zero, size: size)
+
+        if urgency == .live {
+          UIColor.systemYellow.withAlphaComponent(0.9).setFill()
+          UIBezierPath(ovalIn: rect).fill()
+        }
 
         // Drop shadow.
         ctx.cgContext.setShadow(
@@ -159,13 +169,13 @@ struct MapView: UIViewRepresentable {
           color: UIColor.black.withAlphaComponent(0.3).cgColor)
 
         // Filled circle in the category color.
-        UIColor(category.color).setFill()
+        UIColor(category.color).withAlphaComponent(alpha).setFill()
         UIBezierPath(ovalIn: rect.insetBy(dx: 2, dy: 2)).fill()
 
         ctx.cgContext.setShadow(offset: .zero, blur: 0, color: nil)
 
         // White ring outline.
-        UIColor.white.setStroke()
+        UIColor.white.withAlphaComponent(alpha).setStroke()
         let ring = UIBezierPath(ovalIn: rect.insetBy(dx: 2, dy: 2))
         ring.lineWidth = 2
         ring.stroke()
@@ -173,7 +183,7 @@ struct MapView: UIViewRepresentable {
         // Centered SF Symbol glyph.
         let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold)
         if let glyph = UIImage(systemName: category.symbolName, withConfiguration: config)?
-          .withTintColor(.white, renderingMode: .alwaysOriginal)
+          .withTintColor(.white.withAlphaComponent(alpha), renderingMode: .alwaysOriginal)
         {
           let glyphSize = glyph.size
           let glyphRect = CGRect(
