@@ -5,6 +5,7 @@ struct ContentView: View {
   @Environment(AuthModel.self) private var auth
   @State private var probeResult: String?
   @State private var probeRunning = false
+  @State private var showingAttribution = false
 
   private let losAngeles = CLLocationCoordinate2D(latitude: 34.0522, longitude: -118.2437)
 
@@ -34,6 +35,12 @@ struct ContentView: View {
           }
           .disabled(probeRunning)
 
+          Button {
+            showingAttribution = true
+          } label: {
+            Label("Attribution", systemImage: "info.circle")
+          }
+
           Button(role: .destructive) {
             Task { await auth.signOut() }
           } label: {
@@ -60,6 +67,9 @@ struct ContentView: View {
       Button("OK") { probeResult = nil }
     } message: { result in
       Text(result)
+    }
+    .sheet(isPresented: $showingAttribution) {
+      AttributionView()
     }
   }
 
