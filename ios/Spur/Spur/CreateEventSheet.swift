@@ -46,6 +46,9 @@ struct CreateEventSheet: View {
           TextField("Description", text: $description, axis: .vertical)
             .lineLimit(3...6)
             .accessibilityIdentifier("create.description")
+          Text("Markdown supported")
+            .font(.caption)
+            .foregroundStyle(.secondary)
           Picker("Category", selection: $category) {
             ForEach(EventCategory.allCases, id: \.self) { c in
               Text(c.rawValue).tag(c)

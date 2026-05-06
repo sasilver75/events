@@ -70,3 +70,44 @@ struct EventsAPIDateDecodingTests {
     }
   }
 }
+
+// MARK: Markdown rendering
+
+@Suite("EventDetailSheet markdown")
+struct EventDetailSheetMarkdownTests {
+
+  @Test("bold, italic, link, and list markers parse to attributed runs")
+  func parsesCommonMarkdown() {
+    let raw = "**bold** and _italic_ and [link](https://example.com)\n- item one\n- item two"
+    let attr = EventDetailSheet.renderMarkdown(raw)
+
+    let plain = String(attr.characters)
+    #expect(plain.contains("bold"))
+    #expect(plain.contains("italic"))
+    #expect(plain.contains("link"))
+    #expect(plain.contains("item one"))
+
+    var sawBold = false
+    var sawItalic = false
+    var sawLink = false
+    for run in attr.runs {
+      if let intent = run.inlinePresentationIntent {
+        if intent.contains(.stronglyEmphasized) { sawBold = true }
+        if intent.contains(.emphasized) { sawItalic = true }
+      }
+      if run.link != nil { sawLink = true }
+    }
+    #expect(sawBold)
+    #expect(sawItalic)
+    #expect(sawLink)
+  }
+
+  // Malformed markdown must not crash; init failures fall back to plain text
+  // so a Host's typo never blanks out the description.
+  @Test("malformed markdown falls back to plain text")
+  func malformedFallsBack() {
+    let raw = "unterminated [link"
+    let attr = EventDetailSheet.renderMarkdown(raw)
+    #expect(String(attr.characters).contains("unterminated"))
+  }
+}
