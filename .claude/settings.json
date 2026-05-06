@@ -11,5 +11,28 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(swift-format lint *)",
+      "mcp__XcodeBuildMCP__snapshot_ui",
+      "mcp__XcodeBuildMCP__tap",
+      "mcp__XcodeBuildMCP__type_text",
+      "mcp__XcodeBuildMCP__swipe",
+      "mcp__XcodeBuildMCP__button",
+      "mcp__XcodeBuildMCP__key_press",
+      "mcp__XcodeBuildMCP__key_sequence",
+      "mcp__XcodeBuildMCP__long_press",
+      "mcp__XcodeBuildMCP__stop_app_sim",
+      "mcp__XcodeBuildMCP__launch_app_logs_sim",
+      "mcp__XcodeBuildMCP__list_sims",
+      "mcp__XcodeBuildMCP__show_build_settings",
+      "mcp__XcodeBuildMCP__set_sim_location",
+      "mcp__XcodeBuildMCP__reset_sim_location",
+      "mcp__XcodeBuildMCP__sim_statusbar",
+      "mcp__XcodeBuildMCP__set_sim_appearance",
+      "mcp__XcodeBuildMCP__start_sim_log_cap",
+      "mcp__XcodeBuildMCP__stop_sim_log_cap"
+    ]
   }
 }

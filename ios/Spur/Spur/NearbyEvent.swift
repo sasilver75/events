@@ -1,0 +1,31 @@
+import CoreLocation
+import Foundation
+
+// Decoded shape of GET /events?near. Mirrors server/internal/events/events.go.
+// `lat`/`lon` are already visibility-resolved server-side (public → exact;
+// fuzzed + non-Committed → display_geom; fuzzed + Committed → exact), so the
+// client treats them as the authoritative pin position with no further logic.
+struct NearbyEvent: Decodable, Identifiable, Hashable {
+  let id: String
+  let title: String
+  let description: String
+  let category: String
+  let startAt: Date
+  let lat: Double
+  let lon: Double
+  let cap: Int
+  let commitCount: Int
+
+  enum CodingKeys: String, CodingKey {
+    case id, title, description, category
+    case startAt = "start_at"
+    case lat, lon, cap
+    case commitCount = "commit_count"
+  }
+
+  var coordinate: CLLocationCoordinate2D {
+    CLLocationCoordinate2D(latitude: lat, longitude: lon)
+  }
+
+  var categoryEnum: EventCategory { .from(category) }
+}
