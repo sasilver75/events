@@ -1,0 +1,11 @@
+// AUTO-GENERATED — do not edit by hand. Re-render with
+// scripts/spur-services-init.sh (see CLAUDE.md "Multi-session coordination").
+//
+// This file holds the per-worktree iOS values that vary with SPUR_OFFSET, so
+// the committed Local.xcconfig stays unchanged across worktree dev sessions.
+//
+// `//` is the xcconfig comment marker, so URLs use the `$()` escape between
+// the colon and the double-slash to keep the parser from eating the rest of
+// the line.
+
+SUPABASE_URL = http:/$()/127.0.0.1:__SPUR_API_PORT__

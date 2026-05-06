@@ -50,9 +50,12 @@ build/
 
 # Per-worktree services pin + rendered Supabase config (see CLAUDE.md "Multi-session coordination").
 # The canonical config lives in supabase/config.toml.template; each worktree renders its own
-# supabase/config.toml from it via scripts/spur-services-init.sh.
+# supabase/config.toml from it via scripts/spur-services-init.sh. The same script renders
+# ios/Spur/Local.generated.xcconfig from its template so the iOS build picks up the
+# worktree's Supabase API port.
 .spur-services
 supabase/config.toml
+ios/Spur/Local.generated.xcconfig
 
 # Swift Package Manager
 .build/

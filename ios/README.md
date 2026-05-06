@@ -37,9 +37,16 @@ with `@Observable` model classes (no separate ViewModel layer).
 
 ## Run
 
-1. Open `Spur/Spur.xcodeproj` in Xcode
-2. Select an iOS 26 simulator from the run-destination menu (e.g. iPhone 17 Pro)
-3. ⌘R
+1. From the repo root, `./scripts/spur-services-init.sh` once per worktree.
+   This renders `Spur/Local.generated.xcconfig` (gitignored) so the build's
+   `SUPABASE_URL` points at the worktree's local Supabase API port. Without
+   this step the build fails with "could not find included file
+   'Local.generated.xcconfig'". See [`CLAUDE.md`](../CLAUDE.md)
+   "Multi-session coordination".
+2. `supabase start` (also from the repo root).
+3. Open `Spur/Spur.xcodeproj` in Xcode.
+4. Select an iOS 26 simulator from the run-destination menu (e.g. iPhone 17 Pro).
+5. ⌘R.
 
 The first build resolves SPM dependencies — expect a one-time delay while
 MapLibre Native downloads.
