@@ -1,11 +1,26 @@
 import SwiftUI
 
-// Two-detent bottom sheet for an Event tapped on the map. Peek (medium) shows
-// the headline metadata; expanded (large) scrolls into the description and
-// any further detail. No Commit button yet — that arrives in issue #11 along
-// with the exact-location reveal for Committed Attendees.
 struct EventDetailSheet: View {
   let event: NearbyEvent
+  var onCommitStateChanged: (_ commitCount: Int, _ committedByMe: Bool) -> Void = { _, _ in }
+
+  @Environment(AuthModel.self) private var auth
+
+  @State private var commitCount: Int
+  @State private var committedByMe: Bool
+  @State private var inFlight = false
+  @State private var errorMessage: String?
+
+  init(
+    event: NearbyEvent,
+    onCommitStateChanged: @escaping (_ commitCount: Int, _ committedByMe: Bool) -> Void = { _, _ in
+    }
+  ) {
+    self.event = event
+    self.onCommitStateChanged = onCommitStateChanged
+    _commitCount = State(initialValue: event.commitCount)
+    _committedByMe = State(initialValue: event.committedByMe)
+  }
 
   var body: some View {
     NavigationStack {
@@ -13,6 +28,12 @@ struct EventDetailSheet: View {
         VStack(alignment: .leading, spacing: 16) {
           header
           metaRow
+          commitButton
+          if let errorMessage {
+            Text(errorMessage)
+              .font(.footnote)
+              .foregroundStyle(.red)
+          }
           Divider()
           description
         }
@@ -53,7 +74,7 @@ struct EventDetailSheet: View {
         secondary: Self.timeLine(event.startTime))
       metaCell(
         icon: "person.2.fill",
-        primary: event.cap.map { "\(event.commitCount) / \($0)" } ?? "\(event.commitCount)",
+        primary: event.cap.map { "\(commitCount) / \($0)" } ?? "\(commitCount)",
         secondary: "Committed")
     }
   }
@@ -67,6 +88,33 @@ struct EventDetailSheet: View {
         Text(secondary).font(.caption).foregroundStyle(.secondary)
       }
     }
+  }
+
+  private var isFull: Bool {
+    guard let cap = event.cap else { return false }
+    return !committedByMe && commitCount >= cap
+  }
+
+  private var commitButton: some View {
+    Button(action: { Task { await toggleCommit() } }) {
+      HStack {
+        if inFlight {
+          ProgressView().controlSize(.small)
+        }
+        Text(commitButtonLabel)
+          .font(.headline)
+      }
+      .frame(maxWidth: .infinity, minHeight: 44)
+    }
+    .buttonStyle(.borderedProminent)
+    .tint(committedByMe ? .gray : .accentColor)
+    .disabled(inFlight || isFull)
+    .accessibilityIdentifier("eventDetail.commitButton")
+  }
+
+  private var commitButtonLabel: String {
+    if isFull { return "Full" }
+    return committedByMe ? "Withdraw" : "Commit"
   }
 
   private var description: some View {
@@ -90,6 +138,40 @@ struct EventDetailSheet: View {
       return parsed
     }
     return AttributedString(raw)
+  }
+
+  private func toggleCommit() async {
+    let priorCount = commitCount
+    let priorCommitted = committedByMe
+    let willCommit = !priorCommitted
+
+    inFlight = true
+    errorMessage = nil
+    committedByMe = willCommit
+    commitCount = priorCount + (willCommit ? 1 : -1)
+
+    defer { inFlight = false }
+
+    do {
+      let result =
+        willCommit
+        ? try await EventsAPI.commit(eventID: event.id, auth: auth)
+        : try await EventsAPI.withdraw(eventID: event.id, auth: auth)
+      commitCount = result.commitCount
+      committedByMe = result.committedByMe
+      onCommitStateChanged(result.commitCount, result.committedByMe)
+    } catch EventsAPI.APIError.eventFull {
+      committedByMe = priorCommitted
+      // Snap the count up to cap so the button reflects the true server
+      // state instead of the stale local count that motivated the attempt.
+      commitCount = event.cap ?? priorCount
+      onCommitStateChanged(commitCount, committedByMe)
+      errorMessage = "This event is full"
+    } catch {
+      commitCount = priorCount
+      committedByMe = priorCommitted
+      errorMessage = error.localizedDescription
+    }
   }
 
   private static func dateLine(_ d: Date) -> String {

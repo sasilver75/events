@@ -25,15 +25,16 @@ const (
 )
 
 type nearbyEvent struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Category    string    `json:"category"`
-	StartTime   time.Time `json:"start_time"`
-	Lat         float64   `json:"lat"`
-	Lon         float64   `json:"lon"`
-	Cap         *int      `json:"cap"`
-	CommitCount int       `json:"commit_count"`
+	ID            string    `json:"id"`
+	Title         string    `json:"title"`
+	Description   string    `json:"description"`
+	Category      string    `json:"category"`
+	StartTime     time.Time `json:"start_time"`
+	Lat           float64   `json:"lat"`
+	Lon           float64   `json:"lon"`
+	Cap           *int      `json:"cap"`
+	CommitCount   int       `json:"commit_count"`
+	CommittedByMe bool      `json:"committed_by_me"`
 }
 
 func TestNearbyEventsEndpoint(t *testing.T) {
@@ -177,6 +178,42 @@ func TestNearbyEventsEndpoint(t *testing.T) {
 		}
 		if got1.Lat != got2.Lat || got1.Lon != got2.Lon {
 			t.Errorf("set-once violated: (%f,%f) → (%f,%f)", got1.Lat, got1.Lon, got2.Lat, got2.Lon)
+		}
+	})
+
+	t.Run("committed_by_me is false when viewer has no commit row", func(t *testing.T) {
+		_, body := get(t, "near=34.0522,-118.2437&radius_m=30000")
+		got := pickByID(body, publicEvent.id)
+		if got == nil {
+			t.Fatalf("public event %s missing from response", publicEvent.id)
+		}
+		if got.CommittedByMe {
+			t.Errorf("committed_by_me: got true, want false (no commit row)")
+		}
+	})
+
+	t.Run("committed_by_me is true after viewer Commits", func(t *testing.T) {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO public.commits (event_id, user_id) VALUES ($1, $2)
+			 ON CONFLICT DO NOTHING`,
+			publicEvent.id, viewerID,
+		); err != nil {
+			t.Fatalf("insert commit: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx,
+				`DELETE FROM public.commits WHERE event_id = $1 AND user_id = $2`,
+				publicEvent.id, viewerID,
+			)
+		})
+
+		_, body := get(t, "near=34.0522,-118.2437&radius_m=30000")
+		got := pickByID(body, publicEvent.id)
+		if got == nil {
+			t.Fatalf("public event %s missing from response", publicEvent.id)
+		}
+		if !got.CommittedByMe {
+			t.Errorf("committed_by_me: got false, want true (viewer Committed)")
 		}
 	})
 
