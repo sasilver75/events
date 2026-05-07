@@ -93,6 +93,12 @@ enum EventsAPI {
     let lon: Double
     let cap: Int?
     let locationVisibility: String
+    // β-Event fields. Both nil for α; both set for β. Server enforces
+    // the pair invariant + threshold ≥ 2 + cap ≥ threshold + deadline
+    // bounds; client validates before submit so the user gets feedback
+    // without a round-trip.
+    let tipThreshold: Int?
+    let tipDeadline: Date?
 
     enum CodingKeys: String, CodingKey {
       case title, description, category
@@ -100,6 +106,8 @@ enum EventsAPI {
       case endTime = "end_time"
       case lat, lon, cap
       case locationVisibility = "location_visibility"
+      case tipThreshold = "tip_threshold"
+      case tipDeadline = "tip_deadline"
     }
   }
 

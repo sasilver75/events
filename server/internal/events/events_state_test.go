@@ -191,21 +191,34 @@ func insertStateFixtureEvent(
 	tippedAt, cancelAt *time.Time,
 ) string {
 	t.Helper()
+	// A row with tipped_at must also carry the β columns (events_tipped_only_for_beta
+	// + events_tip_pair). Synthesize plausible β values here so test cases stay
+	// focused on the state-function inputs.
+	var tipThreshold *int
+	var tipDeadline *time.Time
+	if tippedAt != nil {
+		thr := 2
+		tipThreshold = &thr
+		dl := startTime.Add(-time.Hour)
+		tipDeadline = &dl
+	}
 	var id string
 	err := pool.QueryRow(ctx, `
 		INSERT INTO public.events (
 			host_id, title, description, category,
 			start_time, end_time, cap,
 			geom, location_visibility, source,
-			tipped_at, cancelled_at
+			tipped_at, cancelled_at,
+			tip_threshold, tip_deadline
 		) VALUES (
 			$1, 'state fixture', 'state fixture', 'Other',
 			$2, $3, 4,
 			ST_SetSRID(ST_MakePoint(-118.2437, 34.0522), 4326),
 			'public', 'curated',
-			$4, $5
+			$4, $5,
+			$6, $7
 		) RETURNING id
-	`, hostID, startTime, endTime, tippedAt, cancelAt).Scan(&id)
+	`, hostID, startTime, endTime, tippedAt, cancelAt, tipThreshold, tipDeadline).Scan(&id)
 	if err != nil {
 		t.Fatalf("insert fixture event: %v", err)
 	}

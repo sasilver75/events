@@ -18,18 +18,20 @@ import (
 )
 
 type createdEvent struct {
-	ID                 string    `json:"id"`
-	HostID             string    `json:"host_id"`
-	Title              string    `json:"title"`
-	Description        string    `json:"description"`
-	Category           string    `json:"category"`
-	StartTime          time.Time `json:"start_time"`
-	EndTime            time.Time `json:"end_time"`
-	Cap                *int      `json:"cap"`
-	Lat                float64   `json:"lat"`
-	Lon                float64   `json:"lon"`
-	FuzzRadiusM        int       `json:"fuzz_radius_m"`
-	LocationVisibility string    `json:"location_visibility"`
+	ID                 string     `json:"id"`
+	HostID             string     `json:"host_id"`
+	Title              string     `json:"title"`
+	Description        string     `json:"description"`
+	Category           string     `json:"category"`
+	StartTime          time.Time  `json:"start_time"`
+	EndTime            time.Time  `json:"end_time"`
+	Cap                *int       `json:"cap"`
+	Lat                float64    `json:"lat"`
+	Lon                float64    `json:"lon"`
+	FuzzRadiusM        int        `json:"fuzz_radius_m"`
+	LocationVisibility string     `json:"location_visibility"`
+	TipThreshold       *int       `json:"tip_threshold,omitempty"`
+	TipDeadline        *time.Time `json:"tip_deadline,omitempty"`
 }
 
 func TestCreateEventEndpoint(t *testing.T) {
@@ -217,6 +219,138 @@ func TestCreateEventEndpoint(t *testing.T) {
 		})
 		if got.Cap != nil {
 			t.Errorf("expected null cap, got %v", *got.Cap)
+		}
+	})
+
+	// β-Event creation per #32. Pair invariant, threshold floor, cap relation,
+	// deadline temporal bounds.
+	betaBody := func() map[string]any {
+		b := validBody()
+		b["title"] = "Test β-Event"
+		b["tip_threshold"] = 4
+		b["tip_deadline"] = now.Add(45 * time.Minute).Format(time.RFC3339Nano)
+		return b
+	}
+
+	t.Run("β happy path returns 201 with tip fields echoed", func(t *testing.T) {
+		rec := post(t, betaBody(), true)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		var got createdEvent
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v: %s", err, rec.Body.String())
+		}
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, `DELETE FROM public.events WHERE id = $1`, got.ID)
+		})
+		if got.TipThreshold == nil || *got.TipThreshold != 4 {
+			t.Errorf("tip_threshold: got %v, want 4", got.TipThreshold)
+		}
+		if got.TipDeadline == nil {
+			t.Errorf("tip_deadline missing in response")
+		}
+	})
+
+	t.Run("β with only tip_threshold returns 400", func(t *testing.T) {
+		body := betaBody()
+		delete(body, "tip_deadline")
+		rec := post(t, body, true)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("β with only tip_deadline returns 400", func(t *testing.T) {
+		body := betaBody()
+		delete(body, "tip_threshold")
+		rec := post(t, body, true)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("β with tip_threshold < 2 returns 400", func(t *testing.T) {
+		body := betaBody()
+		body["tip_threshold"] = 1
+		rec := post(t, body, true)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("β with cap < tip_threshold returns 400", func(t *testing.T) {
+		body := betaBody()
+		body["cap"] = 3
+		body["tip_threshold"] = 5
+		rec := post(t, body, true)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("β with tip_deadline in the past returns 400", func(t *testing.T) {
+		body := betaBody()
+		body["tip_deadline"] = now.Add(-1 * time.Minute).Format(time.RFC3339Nano)
+		rec := post(t, body, true)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("β with tip_deadline within 15min of start returns 400", func(t *testing.T) {
+		body := betaBody()
+		// start_time is now+2h; deadline at start-10min violates the 15min margin.
+		body["tip_deadline"] = now.Add(2*time.Hour - 10*time.Minute).Format(time.RFC3339Nano)
+		rec := post(t, body, true)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	// Seeder auto-commit: a β creator is auto-Committed in the same transaction
+	// as the INSERT and counts toward tip_threshold. α creators are not.
+	t.Run("β create auto-commits the Seeder", func(t *testing.T) {
+		rec := post(t, betaBody(), true)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		var got createdEvent
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, `DELETE FROM public.events WHERE id = $1`, got.ID)
+		})
+		var hasCommit bool
+		if err := pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM public.commits WHERE event_id = $1 AND user_id = $2)`,
+			got.ID, got.HostID,
+		).Scan(&hasCommit); err != nil {
+			t.Fatalf("query commit: %v", err)
+		}
+		if !hasCommit {
+			t.Errorf("expected Seeder commits row to exist for β event")
+		}
+	})
+
+	t.Run("α create does NOT auto-commit the Host", func(t *testing.T) {
+		rec := post(t, validBody(), true)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		var got createdEvent
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, `DELETE FROM public.events WHERE id = $1`, got.ID)
+		})
+		var hasCommit bool
+		if err := pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM public.commits WHERE event_id = $1 AND user_id = $2)`,
+			got.ID, got.HostID,
+		).Scan(&hasCommit); err != nil {
+			t.Fatalf("query commit: %v", err)
+		}
+		if hasCommit {
+			t.Errorf("α create must not auto-commit the Host")
 		}
 	})
 }

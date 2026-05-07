@@ -1,22 +1,33 @@
 import CoreLocation
 import SwiftUI
 
-// CreateEventSheet collects the input for an α-Event (Hosted) and posts it
-// via EventsAPI.create. Validation mirrors the server (PRD US 13 / issue
-// #29) so the user gets feedback before the round-trip:
+// CreateEventSheet collects the input for an Event and posts it via
+// EventsAPI.create. Two flavors per PRD §Event creation:
+//   - Hosted (α): the creator is the accountable Host; no Tip threshold.
+//   - Seeded (β): the creator is a Seeder; the Event isn't binding until
+//     N strangers Commit (Tip threshold), and is auto-cancelled if the
+//     Tip deadline passes without reaching it. Per ADR 0001, Seeders
+//     cannot cancel — only the auto-cancel deadline applies.
+//
+// Validation mirrors the server (issues #29, #32):
 //   - title required
 //   - start_time ∈ [now, now + 72hr]
 //   - end_time > start_time
 //   - cap, when set, ≥ 1
-//
-// β-Events / Tip threshold (#32) and rep-/friends-gating (#38, future) are
-// not surfaced here — this sheet is α-only.
+//   - β: tip_threshold ≥ 2; cap (if set) ≥ tip_threshold;
+//        tip_deadline ∈ (now, start_time - 15min)
 struct CreateEventSheet: View {
   let initialCenter: CLLocationCoordinate2D
   let onCreated: () -> Void
 
   @Environment(AuthModel.self) private var auth
   @Environment(\.dismiss) private var dismiss
+
+  enum EventKind: String, CaseIterable, Identifiable {
+    case hosted = "Hosted"
+    case seeded = "Seeded"
+    var id: String { rawValue }
+  }
 
   @State private var title: String = ""
   @State private var description: String = ""
@@ -27,6 +38,9 @@ struct CreateEventSheet: View {
   @State private var capEnabled: Bool = true
   @State private var capValue: Int = 8
   @State private var visibilityFuzzed: Bool = true
+  @State private var kind: EventKind = .hosted
+  @State private var tipThreshold: Int = 4
+  @State private var tipDeadline: Date = Date().addingTimeInterval(0)
 
   @State private var submitting: Bool = false
   @State private var submitError: String?
@@ -35,11 +49,38 @@ struct CreateEventSheet: View {
     self.initialCenter = initialCenter
     self.onCreated = onCreated
     self._pinCoordinate = State(initialValue: initialCenter)
+    // Default the Tip deadline to halfway between now and start_time - 15min,
+    // so it sits comfortably inside the (now, start_time - 15min] window for
+    // any reasonable starting offset (PRD §Event creation gives "start - 1hr"
+    // as the spec default; halving keeps the default robust when start_time
+    // is close).
+    let initialStart = Date().addingTimeInterval(60 * 60)
+    let upper = initialStart.addingTimeInterval(-15 * 60)
+    let now = Date()
+    self._tipDeadline = State(
+      initialValue: now.addingTimeInterval(upper.timeIntervalSince(now) / 2))
   }
 
   var body: some View {
     NavigationStack {
       Form {
+        Section("Kind") {
+          Picker("Event kind", selection: $kind) {
+            ForEach(EventKind.allCases) { k in
+              Text(k.rawValue).tag(k)
+            }
+          }
+          .pickerStyle(.segmented)
+          .accessibilityIdentifier("create.kind")
+          Text(
+            kind == .hosted
+              ? "You're hosting. Your reputation is on the line."
+              : "Open to the crowd. Auto-cancels if it doesn't Tip by the deadline."
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
+
         Section("Event") {
           TextField("Title", text: $title)
             .accessibilityIdentifier("create.title")
@@ -65,6 +106,9 @@ struct CreateEventSheet: View {
           )
           .onChange(of: startTime) { _, new in
             if endTime <= new { endTime = new.addingTimeInterval(60 * 60) }
+            // Re-clamp the Tip deadline so it stays inside the valid window.
+            let upper = new.addingTimeInterval(-15 * 60)
+            if tipDeadline >= upper { tipDeadline = upper.addingTimeInterval(-1) }
           }
           .accessibilityIdentifier("create.startTime")
           DatePicker(
@@ -100,6 +144,22 @@ struct CreateEventSheet: View {
           }
         }
 
+        if kind == .seeded {
+          Section("Tip") {
+            Stepper("Tip at \(tipThreshold) Commits", value: $tipThreshold, in: 2...50)
+              .accessibilityIdentifier("create.tipThreshold")
+            DatePicker(
+              "Deadline",
+              selection: $tipDeadline,
+              in: Date()...startTime.addingTimeInterval(-15 * 60)
+            )
+            .accessibilityIdentifier("create.tipDeadline")
+            Text("If \(tipThreshold) Commits don't land by the deadline, the Event auto-cancels.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+
         if let err = submitError {
           Section {
             Text(err).foregroundStyle(.red).font(.footnote)
@@ -125,8 +185,17 @@ struct CreateEventSheet: View {
   }
 
   private var canSubmit: Bool {
-    !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      && endTime > startTime
+    let titleOK = !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let timeOK = endTime > startTime
+    guard titleOK && timeOK else { return false }
+    if kind == .seeded {
+      guard tipThreshold >= 2 else { return false }
+      if capEnabled && capValue < tipThreshold { return false }
+      let now = Date()
+      let upper = startTime.addingTimeInterval(-15 * 60)
+      if tipDeadline <= now || tipDeadline > upper { return false }
+    }
+    return true
   }
 
   private func submit() async {
@@ -134,6 +203,8 @@ struct CreateEventSheet: View {
     submitError = nil
     defer { submitting = false }
 
+    let (thr, dl): (Int?, Date?) =
+      kind == .seeded ? (tipThreshold, tipDeadline) : (nil, nil)
     let input = EventsAPI.CreateInput(
       title: title.trimmingCharacters(in: .whitespacesAndNewlines),
       description: description,
@@ -143,7 +214,9 @@ struct CreateEventSheet: View {
       lat: pinCoordinate.latitude,
       lon: pinCoordinate.longitude,
       cap: capEnabled ? capValue : nil,
-      locationVisibility: visibilityFuzzed ? "fuzzed" : "public")
+      locationVisibility: visibilityFuzzed ? "fuzzed" : "public",
+      tipThreshold: thr,
+      tipDeadline: dl)
     do {
       try await EventsAPI.create(input, auth: auth)
       onCreated()
