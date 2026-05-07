@@ -307,4 +307,50 @@ func TestCreateEventEndpoint(t *testing.T) {
 			t.Errorf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
 		}
 	})
+
+	// Seeder auto-commit: a β creator is auto-Committed in the same transaction
+	// as the INSERT and counts toward tip_threshold. α creators are not.
+	t.Run("β create auto-commits the Seeder", func(t *testing.T) {
+		rec := post(t, betaBody(), true)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		var got createdEvent
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, `DELETE FROM public.events WHERE id = $1`, got.ID)
+		})
+		var hasCommit bool
+		if err := pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM public.commits WHERE event_id = $1 AND user_id = $2)`,
+			got.ID, got.HostID,
+		).Scan(&hasCommit); err != nil {
+			t.Fatalf("query commit: %v", err)
+		}
+		if !hasCommit {
+			t.Errorf("expected Seeder commits row to exist for β event")
+		}
+	})
+
+	t.Run("α create does NOT auto-commit the Host", func(t *testing.T) {
+		rec := post(t, validBody(), true)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		var got createdEvent
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, `DELETE FROM public.events WHERE id = $1`, got.ID)
+		})
+		var hasCommit bool
+		if err := pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM public.commits WHERE event_id = $1 AND user_id = $2)`,
+			got.ID, got.HostID,
+		).Scan(&hasCommit); err != nil {
+			t.Fatalf("query commit: %v", err)
+		}
+		if hasCommit {
+			t.Errorf("α create must not auto-commit the Host")
+		}
+	})
 }

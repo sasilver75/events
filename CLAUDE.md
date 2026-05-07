@@ -98,15 +98,28 @@ Without partitioning, they will clobber each other's iOS simulator state and
 build artifacts. Rules:
 
 - **Pin one simulator per worktree.** Each worktree root holds a gitignored
-  `.spur-sim` file with `SPUR_SIM_UDID`, `SPUR_SIM_NAME`, and
-  `SPUR_DERIVED_DATA`. Always read it before any `simctl` / `xcodebuild` /
-  XcodeBuildMCP call. **Never** target `booted` or
-  `generic/platform=iOS Simulator` — they are shared.
+  `.spur-sim` file with `SPUR_SIM_UDID`, `SPUR_SIM_NAME`,
+  `SPUR_DERIVED_DATA`, and `SPUR_SIM_LAT` / `SPUR_SIM_LON`. Always read it
+  before any `simctl` / `xcodebuild` / XcodeBuildMCP call. **Never** target
+  `booted` or `generic/platform=iOS Simulator` — they are shared.
 - **Create `.spur-sim` if missing.** Run `xcrun simctl list devices available`
   to find an `iPhone 17*` UDID, cross-check sibling worktrees'
   `.spur-sim` (`cat ../*/.spur-sim 2>/dev/null`) so you don't pick a UDID
-  another session has already claimed, then write the file. Boot the
-  simulator with that UDID before installing.
+  another session has already claimed, then write the file. Default
+  `SPUR_SIM_LAT=34.0522` / `SPUR_SIM_LON=-118.2437` (LA — matches the
+  curated seeds) unless the worktree is testing a different region. Boot
+  the simulator with that UDID before installing.
+- **Pin the sim's GPS, not just its UDID.** The iOS app's browse query is
+  GPS-driven (`near=<lat>,<lon>` from `CoreLocation`); the map's region
+  and the "Spur — Los Angeles" header are cosmetic and don't constrain
+  the query. Sims default GPS to Apple Park (SF Bay) and persist that
+  across reboots, so seeded LA fixtures vanish from browse and you waste
+  cycles debugging "no events nearby". The iOS app caches its first
+  CoreLocation fix at launch, so the GPS must be in place **before** the
+  app starts — setting it afterwards requires killing and relaunching
+  the app. Run `scripts/spur-sim-set-location.sh` (boots the sim if
+  needed, applies the `.spur-sim` pin) BEFORE every `build_run_sim` /
+  `launch_app_sim`. Idempotent.
 - **Worktree-local DerivedData.** Pass `-derivedDataPath ./.build/derived-data`
   to every `xcodebuild` invocation (and the equivalent parameter to
   XcodeBuildMCP). `.build/` is already gitignored.

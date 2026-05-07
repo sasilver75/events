@@ -272,6 +272,13 @@ func (in *createEventRequest) validate(now time.Time) error {
 // neither. The Tip transition (sets tipped_at) lives in the Commit handler;
 // auto-cancel of un-Tipped β-Events past their deadline lives in the
 // lifecycle background loop. Rep-/friends-gating arrives in #38.
+//
+// Seeder auto-commit: a β-Event creator is auto-Committed in the same
+// transaction as the INSERT — the Seeder is presumed to attend their own
+// proposal, and the auto-Commit counts toward tip_threshold (PRD §Event
+// creation reads "Tag in Echo Park, 6 needed" as 6 total Commits, the
+// Seeder being one of them). α creators are not auto-Committed — Hosts run
+// the event without occupying a cap slot.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	hostID, ok := auth.UserIDFrom(r.Context())
 	if !ok {
@@ -294,7 +301,15 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		visibility = "fuzzed"
 	}
 
-	row := h.pool.QueryRow(r.Context(), `
+	ctx := r.Context()
+	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "begin tx: "+err.Error())
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	row := tx.QueryRow(ctx, `
 		INSERT INTO public.events (
 			host_id, title, description, category,
 			start_time, end_time, cap,
@@ -337,6 +352,21 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		&out.TipThreshold, &out.TipDeadline,
 	); err != nil {
 		writeError(w, http.StatusInternalServerError, "insert event: "+err.Error())
+		return
+	}
+
+	if in.TipThreshold != nil {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO public.commits (event_id, user_id) VALUES ($1, $2)`,
+			out.ID, hostID,
+		); err != nil {
+			writeError(w, http.StatusInternalServerError, "auto-commit seeder: "+err.Error())
+			return
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "commit tx: "+err.Error())
 		return
 	}
 
