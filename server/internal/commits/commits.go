@@ -35,6 +35,12 @@ type response struct {
 // count check. Repeat Commits by the same user are idempotent — they short
 // circuit before the cap check, so a user already inside a full event still
 // receives 200.
+//
+// β Tip transition: when the row carries a tip_threshold and the post-Commit
+// count reaches it, tipped_at is set to now() inside the same transaction.
+// The transition is sticky (Withdraw never clears tipped_at) and idempotent
+// (the UPDATE's WHERE matches zero rows once tipped_at is non-null). For
+// α-Events the column is NULL and the UPDATE is skipped entirely.
 func (h *Handler) Commit(w http.ResponseWriter, r *http.Request) {
 	userID, ok := auth.UserIDFrom(r.Context())
 	if !ok {
@@ -56,9 +62,10 @@ func (h *Handler) Commit(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var cap int
+	var tipThreshold *int
 	err = tx.QueryRow(ctx,
-		`SELECT cap FROM public.events WHERE id = $1 FOR UPDATE`, eventID,
-	).Scan(&cap)
+		`SELECT cap, tip_threshold FROM public.events WHERE id = $1 FOR UPDATE`, eventID,
+	).Scan(&cap, &tipThreshold)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "event not found")
 		return
@@ -105,6 +112,19 @@ func (h *Handler) Commit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "final count: "+err.Error())
 		return
 	}
+
+	if tipThreshold != nil && finalCount >= *tipThreshold {
+		if _, err := tx.Exec(ctx,
+			`UPDATE public.events
+			 SET tipped_at = now()
+			 WHERE id = $1 AND tipped_at IS NULL`,
+			eventID,
+		); err != nil {
+			writeError(w, http.StatusInternalServerError, "tip update: "+err.Error())
+			return
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, "commit tx: "+err.Error())
 		return

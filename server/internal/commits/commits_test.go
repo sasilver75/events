@@ -278,6 +278,100 @@ func TestCommitsEndpoints(t *testing.T) {
 			t.Errorf("DB row count: got %d, want 1", dbCount)
 		}
 	})
+
+	// β-Event Tip transition per #32. The Commit handler must set tipped_at
+	// when the post-Commit count reaches tip_threshold, leave it NULL below
+	// threshold, and never clear it on Withdraw (sticky).
+	tippedAt := func(t *testing.T, eventID string) *string {
+		t.Helper()
+		var ts *string
+		if err := pool.QueryRow(ctx,
+			`SELECT tipped_at::text FROM public.events WHERE id = $1`, eventID,
+		).Scan(&ts); err != nil {
+			t.Fatalf("read tipped_at: %v", err)
+		}
+		return ts
+	}
+
+	t.Run("β commit reaching threshold sets tipped_at", func(t *testing.T) {
+		eventID := insertBetaEvent(ctx, t, pool, hostID, 4, 2)
+		t.Cleanup(func() { clearCommits(t, eventID); deleteEvent(ctx, t, pool, eventID) })
+
+		_, _ = doRequest(t, http.MethodPost, "/events/"+eventID+"/commit", tokenA)
+		if got := tippedAt(t, eventID); got != nil {
+			t.Fatalf("tipped_at after 1/2 commits: got %v, want nil", *got)
+		}
+		_, _ = doRequest(t, http.MethodPost, "/events/"+eventID+"/commit", tokenB)
+		if got := tippedAt(t, eventID); got == nil {
+			t.Errorf("tipped_at after 2/2 commits: got nil, want non-nil")
+		}
+	})
+
+	t.Run("β tipped_at is sticky across Withdraw", func(t *testing.T) {
+		eventID := insertBetaEvent(ctx, t, pool, hostID, 4, 2)
+		t.Cleanup(func() { clearCommits(t, eventID); deleteEvent(ctx, t, pool, eventID) })
+
+		_, _ = doRequest(t, http.MethodPost, "/events/"+eventID+"/commit", tokenA)
+		_, _ = doRequest(t, http.MethodPost, "/events/"+eventID+"/commit", tokenB)
+		before := tippedAt(t, eventID)
+		if before == nil {
+			t.Fatalf("setup: expected tipped_at to be set")
+		}
+		_, _ = doRequest(t, http.MethodDelete, "/events/"+eventID+"/commit", tokenB)
+		after := tippedAt(t, eventID)
+		if after == nil || *after != *before {
+			t.Errorf("tipped_at after Withdraw: got %v, want %v (sticky)", after, *before)
+		}
+	})
+
+	t.Run("α commit never sets tipped_at", func(t *testing.T) {
+		eventID := insertEvent(ctx, t, pool, hostID, 4)
+		t.Cleanup(func() { clearCommits(t, eventID); deleteEvent(ctx, t, pool, eventID) })
+
+		_, _ = doRequest(t, http.MethodPost, "/events/"+eventID+"/commit", tokenA)
+		_, _ = doRequest(t, http.MethodPost, "/events/"+eventID+"/commit", tokenB)
+		if got := tippedAt(t, eventID); got != nil {
+			t.Errorf("α tipped_at: got %v, want nil", *got)
+		}
+	})
+
+	// Two simultaneous Commits at threshold-1 must result in exactly one
+	// tipped_at write (not double-fired). The FOR UPDATE row lock + the
+	// `WHERE tipped_at IS NULL` guard make this safe; this test pins it.
+	t.Run("concurrent commits at threshold: tipped_at set exactly once", func(t *testing.T) {
+		eventID := insertBetaEvent(ctx, t, pool, hostID, 4, 2)
+		t.Cleanup(func() { clearCommits(t, eventID); deleteEvent(ctx, t, pool, eventID) })
+
+		srv := httptest.NewServer(r)
+		t.Cleanup(srv.Close)
+
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		tokens := []string{tokenA, tokenB}
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				req, _ := http.NewRequest(http.MethodPost, srv.URL+"/events/"+eventID+"/commit", nil)
+				req.Header.Set("Authorization", "Bearer "+tokens[i])
+				<-start
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					t.Errorf("racer %d: %v", i, err)
+					return
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+			}(i)
+		}
+		close(start)
+		wg.Wait()
+
+		ts := tippedAt(t, eventID)
+		if ts == nil {
+			t.Fatalf("tipped_at: got nil, want non-nil after 2/2 concurrent commits")
+		}
+	})
 }
 
 func seedHostID(ctx context.Context, t *testing.T, pool *pgxpool.Pool) string {
@@ -308,6 +402,29 @@ func insertEvent(ctx context.Context, t *testing.T, pool *pgxpool.Pool, hostID s
 	`, hostID, cap).Scan(&id)
 	if err != nil {
 		t.Fatalf("insert event: %v", err)
+	}
+	return id
+}
+
+func insertBetaEvent(ctx context.Context, t *testing.T, pool *pgxpool.Pool, hostID string, cap, threshold int) string {
+	t.Helper()
+	var id string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO public.events (
+			host_id, title, description, category,
+			start_time, end_time, cap,
+			geom, source, location_visibility,
+			tip_threshold, tip_deadline
+		) VALUES (
+			$1, 'β commits test', 'β commits test', 'Other',
+			now() + interval '2 hours', now() + interval '3 hours', $2,
+			ST_SetSRID(ST_MakePoint(-118.2437, 34.0522), 4326),
+			'curated', 'public',
+			$3, now() + interval '1 hour'
+		) RETURNING id
+	`, hostID, cap, threshold).Scan(&id)
+	if err != nil {
+		t.Fatalf("insert β event: %v", err)
 	}
 	return id
 }

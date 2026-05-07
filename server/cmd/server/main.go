@@ -15,13 +15,18 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	// Internal packages — one per write surface. Each exposes a Handler
+	// constructed with a *pgxpool.Pool and bound to routes below. lifecycle
+	// is the in-process background loop (β-cancel today, Done-poller in #34).
 	"github.com/sasilver75/events/server/internal/auth"
 	"github.com/sasilver75/events/server/internal/checkins"
 	"github.com/sasilver75/events/server/internal/commits"
 	"github.com/sasilver75/events/server/internal/events"
+	"github.com/sasilver75/events/server/internal/lifecycle"
 )
 
 func main() {
+	// --- config ---
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -36,22 +41,32 @@ func main() {
 		log.Fatalf("DATABASE_URL must be set")
 	}
 
-	ctx := context.Background()
-	verifier, err := auth.NewVerifier(ctx, supabaseURL)
+	// --- dependencies (auth verifier + pgx pool) ---
+	// appCtx scopes the lifecycle background loop. Cancelled on shutdown
+	// so the loop exits cleanly before the HTTP server stops.
+	appCtx, cancelApp := context.WithCancel(context.Background())
+	defer cancelApp()
+
+	verifier, err := auth.NewVerifier(appCtx, supabaseURL)
 	if err != nil {
 		log.Fatalf("auth verifier: %v", err)
 	}
 
-	pool, err := pgxpool.New(ctx, dbURL)
+	pool, err := pgxpool.New(appCtx, dbURL)
 	if err != nil {
 		log.Fatalf("db pool: %v", err)
 	}
 	defer pool.Close()
 
+	// --- handlers (one per internal package) ---
 	eventsHandler := events.New(pool)
 	commitsHandler := commits.New(pool)
 	checkinsHandler := checkins.New(pool)
 
+	// --- background lifecycle loop ---
+	go lifecycle.New(pool).Run(appCtx)
+
+	// --- router + routes ---
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -66,11 +81,13 @@ func main() {
 		r.Get("/me", auth.Me)
 		r.Get("/events", eventsHandler.Near)
 		r.Post("/events", eventsHandler.Create)
+		r.Delete("/events/{id}", eventsHandler.Cancel)
 		r.Post("/events/{id}/commit", commitsHandler.Commit)
 		r.Delete("/events/{id}/commit", commitsHandler.Withdraw)
 		r.Post("/events/{id}/checkin", checkinsHandler.CheckIn)
 	})
 
+	// --- HTTP server lifecycle (start + graceful shutdown on SIGINT/SIGTERM) ---
 	srv := &http.Server{
 		Addr:              ":" + port,
 		Handler:           r,
@@ -89,6 +106,7 @@ func main() {
 	<-stop
 
 	log.Println("server shutting down")
+	cancelApp()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/sasilver75/events/server/internal/auth"
@@ -27,6 +30,10 @@ const (
 	// warm today), and anything slower than 50ms is signal — likely host
 	// resource starvation, a missing index, or a plan flip — not noise.
 	browseSlowThreshold = 50 * time.Millisecond
+	// β-Event: deadline must precede start_time by at least this margin
+	// so the Tip transition has a meaningful "is the Event happening?"
+	// answer before Attendees are en route. Per PRD §Event creation.
+	tipDeadlineMargin = 15 * time.Minute
 )
 
 var validCategories = map[string]bool{
@@ -164,34 +171,45 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 }
 
 // createEventRequest is the JSON body of POST /events.
+//
+// α-Event: TipThreshold and TipDeadline both nil.
+// β-Event: TipThreshold and TipDeadline both non-nil. The pair invariant
+// is enforced in validate() and again at the DB (events_tip_pair).
 type createEventRequest struct {
-	Title              string    `json:"title"`
-	Description        string    `json:"description"`
-	Category           string    `json:"category"`
-	StartTime          time.Time `json:"start_time"`
-	EndTime            time.Time `json:"end_time"`
-	Lat                float64   `json:"lat"`
-	Lon                float64   `json:"lon"`
-	Cap                *int      `json:"cap"`
-	LocationVisibility string    `json:"location_visibility"`
+	Title              string     `json:"title"`
+	Description        string     `json:"description"`
+	Category           string     `json:"category"`
+	StartTime          time.Time  `json:"start_time"`
+	EndTime            time.Time  `json:"end_time"`
+	Lat                float64    `json:"lat"`
+	Lon                float64    `json:"lon"`
+	Cap                *int       `json:"cap"`
+	LocationVisibility string     `json:"location_visibility"`
+	TipThreshold       *int       `json:"tip_threshold,omitempty"`
+	TipDeadline        *time.Time `json:"tip_deadline,omitempty"`
 }
 
 // createdEvent is returned to the Host after a successful POST /events.
 // The Host sees the exact pin (geom), not display_geom — fuzzing is for
 // non-Attendee viewers via GET /events?near.
+//
+// TipThreshold and TipDeadline are echoed back when set so the iOS create
+// sheet can display the confirmed β configuration without a follow-up read.
 type createdEvent struct {
-	ID                 string    `json:"id"`
-	HostID             string    `json:"host_id"`
-	Title              string    `json:"title"`
-	Description        string    `json:"description"`
-	Category           string    `json:"category"`
-	StartTime          time.Time `json:"start_time"`
-	EndTime            time.Time `json:"end_time"`
-	Cap                *int      `json:"cap"`
-	Lat                float64   `json:"lat"`
-	Lon                float64   `json:"lon"`
-	FuzzRadiusM        int       `json:"fuzz_radius_m"`
-	LocationVisibility string    `json:"location_visibility"`
+	ID                 string     `json:"id"`
+	HostID             string     `json:"host_id"`
+	Title              string     `json:"title"`
+	Description        string     `json:"description"`
+	Category           string     `json:"category"`
+	StartTime          time.Time  `json:"start_time"`
+	EndTime            time.Time  `json:"end_time"`
+	Cap                *int       `json:"cap"`
+	Lat                float64    `json:"lat"`
+	Lon                float64    `json:"lon"`
+	FuzzRadiusM        int        `json:"fuzz_radius_m"`
+	LocationVisibility string     `json:"location_visibility"`
+	TipThreshold       *int       `json:"tip_threshold,omitempty"`
+	TipDeadline        *time.Time `json:"tip_deadline,omitempty"`
 }
 
 func (in *createEventRequest) validate(now time.Time) error {
@@ -224,17 +242,36 @@ func (in *createEventRequest) validate(now time.Time) error {
 	default:
 		return fmt.Errorf("invalid location_visibility %q", in.LocationVisibility)
 	}
+	if (in.TipThreshold == nil) != (in.TipDeadline == nil) {
+		return errors.New("tip_threshold and tip_deadline must both be set (β-Event) or both omitted (α-Event)")
+	}
+	if in.TipThreshold != nil {
+		if *in.TipThreshold < 2 {
+			return errors.New("tip_threshold must be ≥ 2")
+		}
+		if in.Cap != nil && *in.Cap < *in.TipThreshold {
+			return errors.New("cap must be ≥ tip_threshold")
+		}
+		if !in.TipDeadline.After(now) {
+			return errors.New("tip_deadline must be in the future")
+		}
+		if in.TipDeadline.After(in.StartTime.Add(-tipDeadlineMargin)) {
+			return fmt.Errorf("tip_deadline must be at least %s before start_time", tipDeadlineMargin)
+		}
+	}
 	return nil
 }
 
-// Create handles POST /events. Inserts an α-Event for the authenticated user
-// and returns the new row. display_geom is computed once server-side as a
-// uniform-random point within fuzz_radius_m of geom (PRD §Geo data model);
+// Create handles POST /events. Inserts an α- or β-Event for the authenticated
+// user and returns the new row. display_geom is computed once server-side as
+// a uniform-random point within fuzz_radius_m of geom (PRD §Geo data model);
 // the set-once invariant is enforced by INSERT-only writes — this row's
 // display_geom is never recomputed after creation.
 //
-// β-Events / Tip threshold (#32) and rep-/friends-gating (#38, future)
-// arrive in later slices; this slice is α-only.
+// α vs β: a β-Event carries tip_threshold + tip_deadline; an α-Event carries
+// neither. The Tip transition (sets tipped_at) lives in the Commit handler;
+// auto-cancel of un-Tipped β-Events past their deadline lives in the
+// lifecycle background loop. Rep-/friends-gating arrives in #38.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	hostID, ok := auth.UserIDFrom(r.Context())
 	if !ok {
@@ -261,7 +298,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO public.events (
 			host_id, title, description, category,
 			start_time, end_time, cap,
-			geom, display_geom, fuzz_radius_m, location_visibility
+			geom, display_geom, fuzz_radius_m, location_visibility,
+			tip_threshold, tip_deadline
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
 			ST_SetSRID(ST_MakePoint($8, $9), 4326),
@@ -273,18 +311,21 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 				)::geometry
 			ELSE NULL END,
 			$11,
-			$10
+			$10,
+			$12, $13
 		)
 		RETURNING
 			id, host_id, title, description, category,
 			start_time, end_time, cap,
 			ST_Y(geom)::float8, ST_X(geom)::float8,
-			fuzz_radius_m, location_visibility
+			fuzz_radius_m, location_visibility,
+			tip_threshold, tip_deadline
 	`,
 		hostID, in.Title, in.Description, in.Category,
 		in.StartTime, in.EndTime, in.Cap,
 		in.Lon, in.Lat,
 		visibility, defaultFuzzM,
+		in.TipThreshold, in.TipDeadline,
 	)
 
 	var out createdEvent
@@ -293,6 +334,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		&out.StartTime, &out.EndTime, &out.Cap,
 		&out.Lat, &out.Lon,
 		&out.FuzzRadiusM, &out.LocationVisibility,
+		&out.TipThreshold, &out.TipDeadline,
 	); err != nil {
 		writeError(w, http.StatusInternalServerError, "insert event: "+err.Error())
 		return
@@ -301,6 +343,62 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+// Cancel handles DELETE /events/{id}.
+//
+// Per ADR 0001, Seeders cannot cancel β-Events: the Tip mechanic is the
+// commitment device, and a Seeder bailing after Commits land would defeat
+// the point. The endpoint enforces this hard.
+//
+// α-Host cancel is a separate slice (see 0009_event_state.up.sql); this
+// handler currently rejects α deletes with 501 so the route exists for
+// the iOS create-sheet to call without a 404 surprise.
+func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
+	userID, ok := auth.UserIDFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no user in context")
+		return
+	}
+	eventID, ok := parseEventID(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid event id")
+		return
+	}
+
+	var hostID string
+	var tipThreshold *int
+	err := h.pool.QueryRow(r.Context(),
+		`SELECT host_id, tip_threshold FROM public.events WHERE id = $1`,
+		eventID,
+	).Scan(&hostID, &tipThreshold)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "event not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "select event: "+err.Error())
+		return
+	}
+	if hostID != userID {
+		writeError(w, http.StatusForbidden, "not the event creator")
+		return
+	}
+	if tipThreshold != nil {
+		writeError(w, http.StatusForbidden, "seeders_cannot_cancel")
+		return
+	}
+	writeError(w, http.StatusNotImplemented, "α-Host cancel not yet implemented")
+}
+
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+func parseEventID(r *http.Request) (string, bool) {
+	raw := chi.URLParam(r, "id")
+	if !uuidPattern.MatchString(raw) {
+		return "", false
+	}
+	return raw, true
 }
 
 func parseNear(raw string) (lat, lon float64, err error) {
