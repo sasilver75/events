@@ -186,6 +186,16 @@ and arrives in later slices:
 - **Live state and check-in** — Commit/Withdraw is unconditional in Wave 1
   (PRD US 23). Live transition + Flake-aware Withdraw + check-in arrive
   with #33+.
+- **Outcome resolution (Show vs Ghost)** — the Done-state poller (#34)
+  writes `attendance_outcomes` rows for every Committed Attendee on Done
+  Events. Wave 2 has two limits worth flagging:
+  - **Show signal is tap-only.** Passive location-confirmation as a Show
+    signal arrives in a later slice; right now an Attendee must open the
+    app at the venue and tap to be recorded as 'show'.
+  - **Outcome vocabulary is `{'show', 'ghost'}` only.** `'flake'` arrives
+    when Withdraw classification (clean Withdraw vs late-Withdraw-as-Flake)
+    ships — extend the CHECK constraint on
+    `attendance_outcomes.outcome` then.
 - **Chat** — no per-Event chat surface yet.
 - **Ratings** — Attendees cannot rate Hosts (or vice versa) post-Event.
 - **Friends** — no friend graph; Commits don't surface social proof.
