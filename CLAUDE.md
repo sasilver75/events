@@ -84,6 +84,12 @@ Use `/tdd` for non-trivial features: red → green → refactor.
   <commit>" when the AC was met as written; a short drift list (what diverged
   from the spec and why) when not. The diff and commit messages don't capture
   decisions made under pressure — the closeout comment does.
+- **Tear down at issue close.** If you started services with
+  `scripts/spur-up.sh`, run `scripts/spur-down.sh` before declaring the
+  issue done — orphan Supabase stacks accumulate (~13 containers each,
+  with `supabase_analytics` pinning a CPU core even when idle) and starve
+  the host. Skip the teardown only when the user has explicitly asked
+  you to leave the stack up.
 
 ## Multi-session coordination
 
@@ -111,22 +117,25 @@ build artifacts. Rules:
 - **Pin host-level services per worktree.** Two workers `supabase start`-ing
   (or any other host-level service starting) against the same default ports
   collide. Each worktree is assigned a single `SPUR_OFFSET` and every
-  networked service derives its ports from that offset. Today the script
-  renders Supabase config and the iOS-build override; future networked
-  services (Go server, Redis, etc.) extend the same pin and the same
+  networked service derives its ports from that offset. The script renders
+  Supabase config, the Go server's listen port, and the iOS-build override;
+  future networked services (Redis, etc.) extend the same pin and the same
   template-rendering pattern. Run `./scripts/spur-services-init.sh` once
-  per worktree (idempotent — pass `--force` to regenerate). The script
-  picks the lowest free offset by reading sibling `.spur-services` pins
-  and probing for already-bound ports, then renders
-  `supabase/config.toml` from `supabase/config.toml.template` (gitignored)
-  with project_id set to the worktree directory name, and renders
-  `ios/Spur/Local.generated.xcconfig` (gitignored) from its template so
-  the iOS build's `SUPABASE_URL` points at the worktree's Supabase API
-  port. The `.spur-services` pin declares `SPUR_OFFSET`, `SPUR_PROJECT_ID`,
-  and `SPUR_SUPABASE_*` URLs; `source .spur-services` to point shells,
-  tests, and Make targets at the worktree's instances. **Never edit
-  `ios/Spur/Local.xcconfig` to change the Supabase URL** — re-run the init
-  script instead; the committed file `#include`s the rendered override.
+  per worktree (idempotent — pass `--force` to regenerate; an existing
+  `SPUR_OFFSET` is preserved across regens). The script picks the lowest
+  free offset by reading sibling `.spur-services` pins and probing for
+  already-bound ports (Supabase API/DB and the Go server's `8080+offset`),
+  then renders `supabase/config.toml` from `supabase/config.toml.template`
+  (gitignored) with project_id set to the worktree directory name, and
+  renders `ios/Spur/Local.generated.xcconfig` (gitignored) from its template
+  so the iOS build's `SUPABASE_URL` and `SERVER_URL` point at the worktree's
+  Supabase API port and Go server port respectively. The `.spur-services`
+  pin declares `SPUR_OFFSET`, `SPUR_PROJECT_ID`, `SPUR_SUPABASE_*` URLs,
+  `SPUR_SERVER_PORT`, and `SPUR_SERVER_URL`; `source .spur-services` to
+  point shells, tests, and Make targets at the worktree's instances.
+  **Never edit `ios/Spur/Local.xcconfig` to change `SUPABASE_URL` or
+  `SERVER_URL`** — re-run the init script instead; the committed file
+  `#include`s the rendered override.
 - **Don't `supabase start` without running the init script first.** A
   hard-coded port collision will fail loudly; a stale `project_id` collision
   (two stacks reusing the same docker container names) will fail silently

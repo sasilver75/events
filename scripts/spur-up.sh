@@ -121,11 +121,11 @@ else
     rm -f "$PIDFILE"
     sleep 1
   fi
-  # If something else is on :8080 (forgotten `go run`, sibling worktree
-  # without pin discipline, etc.), bail loudly rather than launch a server
-  # that will silently crash on bind.
-  if foreign_pid=$(lsof -t -i :8080 2>/dev/null); then
-    echo "  port 8080 is held by pid $foreign_pid — kill it and retry:" >&2
+  # If something else is on the worktree's pinned port (forgotten `go run`,
+  # sibling worktree without pin discipline, etc.), bail loudly rather than
+  # launch a server that will silently crash on bind.
+  if foreign_pid=$(lsof -t -i :"$SPUR_SERVER_PORT" 2>/dev/null); then
+    echo "  port $SPUR_SERVER_PORT is held by pid $foreign_pid — kill it and retry:" >&2
     echo "    kill $foreign_pid" >&2
     exit 1
   fi
@@ -133,14 +133,14 @@ else
   cd "$ROOT/server"
   DATABASE_URL="$DB_URL" \
     SUPABASE_URL="$SPUR_SUPABASE_API_URL" \
-    PORT=8080 \
+    PORT="$SPUR_SERVER_PORT" \
     nohup go run ./cmd/server >"$LOGFILE" 2>&1 &
   echo $! > "$PIDFILE"
   cd - >/dev/null
 
   for i in $(seq 1 30); do
     sleep 1
-    if curl -sf http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+    if curl -sf "$SPUR_SERVER_URL/healthz" >/dev/null 2>&1; then
       break
     fi
     if [ "$i" -eq 30 ]; then
@@ -156,7 +156,7 @@ cat <<EOF
 
   Supabase API:     $SPUR_SUPABASE_API_URL
   Supabase Studio:  $SPUR_SUPABASE_STUDIO_URL
-  Go server:        http://127.0.0.1:8080
+  Go server:        $SPUR_SERVER_URL
                     pid: $(cat "$PIDFILE")
                     logs: $LOGFILE
 
