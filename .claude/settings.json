@@ -15,6 +15,12 @@
   "permissions": {
     "allow": [
       "Bash(swift-format lint *)",
+      "Bash(supabase status)",
+      "Bash(supabase status *)",
+      "Bash(xcrun simctl list *)",
+      "Bash(gh label list *)",
+      "mcp__XcodeBuildMCP__screenshot",
+      "mcp__XcodeBuildMCP__session_show_defaults",
       "mcp__XcodeBuildMCP__snapshot_ui",
       "mcp__XcodeBuildMCP__tap",
       "mcp__XcodeBuildMCP__type_text",

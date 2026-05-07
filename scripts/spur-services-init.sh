@@ -94,28 +94,36 @@ port_in_use() {
   lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
 }
 
-# An offset is taken if (a) a sibling pin claims it, or (b) any of its
-# load-bearing ports is already bound — covers legacy stacks brought up
-# before this convention existed (no pin file) and any non-Supabase service
-# that grabbed the port.
-OFFSET=0
-while :; do
-  taken=0
-  for o in ${TAKEN_OFFSETS[@]+"${TAKEN_OFFSETS[@]}"}; do
-    if [ "$o" = "$OFFSET" ]; then taken=1; break; fi
-  done
-  if [ "$taken" -eq 0 ]; then
-    if port_in_use $((54321 + OFFSET)) || port_in_use $((54322 + OFFSET)); then
-      taken=1
+# Preserve an existing pin's offset on --force regen so we don't reassign
+# offsets to worktrees that already have a stack on disk. Only pick a fresh
+# offset if no pin exists yet.
+EXISTING_OFFSET="$(read_offset "$PIN")"
+if [ -n "$EXISTING_OFFSET" ]; then
+  OFFSET="$EXISTING_OFFSET"
+else
+  # An offset is taken if (a) a sibling pin claims it, or (b) any of its
+  # load-bearing ports is already bound — covers legacy stacks brought up
+  # before this convention existed (no pin file) and any non-Supabase service
+  # that grabbed the port.
+  OFFSET=0
+  while :; do
+    taken=0
+    for o in ${TAKEN_OFFSETS[@]+"${TAKEN_OFFSETS[@]}"}; do
+      if [ "$o" = "$OFFSET" ]; then taken=1; break; fi
+    done
+    if [ "$taken" -eq 0 ]; then
+      if port_in_use $((54321 + OFFSET)) || port_in_use $((54322 + OFFSET)) || port_in_use $((8080 + OFFSET)); then
+        taken=1
+      fi
     fi
-  fi
-  if [ "$taken" -eq 0 ]; then break; fi
-  OFFSET=$((OFFSET + 10))
-  if [ "$OFFSET" -gt 1000 ]; then
-    echo "could not find a free offset under +1000" >&2
-    exit 1
-  fi
-done
+    if [ "$taken" -eq 0 ]; then break; fi
+    OFFSET=$((OFFSET + 10))
+    if [ "$OFFSET" -gt 1000 ]; then
+      echo "could not find a free offset under +1000" >&2
+      exit 1
+    fi
+  done
+fi
 
 PROJECT_ID="$(basename "$ROOT")"
 
@@ -127,6 +135,7 @@ STUDIO_PORT=$((54323 + OFFSET))
 INBUCKET_PORT=$((54324 + OFFSET))
 ANALYTICS_PORT=$((54327 + OFFSET))
 EDGE_INSPECTOR_PORT=$((8083 + OFFSET))
+SERVER_PORT=$((8080 + OFFSET))
 
 sed \
   -e "s/__SPUR_PROJECT_ID__/$PROJECT_ID/g" \
@@ -142,6 +151,7 @@ sed \
 
 sed \
   -e "s/__SPUR_API_PORT__/$API_PORT/g" \
+  -e "s/__SPUR_SERVER_PORT__/$SERVER_PORT/g" \
   "$IOS_TEMPLATE" > "$IOS_CONFIG"
 
 cat > "$PIN" <<EOF
@@ -158,6 +168,10 @@ SPUR_SUPABASE_API_URL=http://127.0.0.1:$API_PORT
 SPUR_SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:$DB_PORT/postgres
 SPUR_SUPABASE_STUDIO_URL=http://127.0.0.1:$STUDIO_PORT
 SPUR_SUPABASE_INBUCKET_URL=http://127.0.0.1:$INBUCKET_PORT
+
+# Go server (8080+offset).
+SPUR_SERVER_PORT=$SERVER_PORT
+SPUR_SERVER_URL=http://127.0.0.1:$SERVER_PORT
 EOF
 
 echo "Assigned offset $OFFSET to project_id=$PROJECT_ID"
@@ -165,6 +179,7 @@ echo "  Supabase API:      http://127.0.0.1:$API_PORT"
 echo "  Supabase DB:       postgresql://postgres:postgres@127.0.0.1:$DB_PORT/postgres"
 echo "  Supabase Studio:   http://127.0.0.1:$STUDIO_PORT"
 echo "  Supabase Inbucket: http://127.0.0.1:$INBUCKET_PORT"
-echo "  iOS Local.generated.xcconfig: SUPABASE_URL → http://127.0.0.1:$API_PORT"
+echo "  Go server:         http://127.0.0.1:$SERVER_PORT"
+echo "  iOS Local.generated.xcconfig: SUPABASE_URL → http://127.0.0.1:$API_PORT, SERVER_URL → http://127.0.0.1:$SERVER_PORT"
 echo
 echo "Next: cd $ROOT && supabase start"

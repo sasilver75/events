@@ -9,3 +9,4 @@
 // the line.
 
 SUPABASE_URL = http:/$()/127.0.0.1:__SPUR_API_PORT__
+SERVER_URL = http:/$()/127.0.0.1:__SPUR_SERVER_PORT__
