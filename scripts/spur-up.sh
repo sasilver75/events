@@ -37,8 +37,12 @@ live_worktrees=$(git -C "$ROOT" worktree list --porcelain \
   | xargs -n1 basename)
 
 # Project ids that docker is currently running a Supabase DB container for.
+# `grep` exits 1 when nothing matches; under `set -o pipefail` that kills
+# the whole script before the orphan-check finishes. The empty-input case
+# is the common one (no Supabase stacks running yet), so absorb the
+# non-match exit explicitly.
 docker_projects=$(docker ps --format '{{.Names}}' \
-  | grep -oE '^supabase_db_.+$' \
+  | { grep -oE '^supabase_db_.+$' || true; } \
   | sed 's/^supabase_db_//' \
   | sort -u)
 
