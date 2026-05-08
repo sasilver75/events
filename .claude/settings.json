@@ -33,6 +33,7 @@
       "Bash(go build *)",
       "Bash(go vet *)",
       "Bash(go test *)",
+      "Bash(gofmt -l *)",
       "Bash(golangci-lint *)",
       "Bash(git fetch*)",
       "Bash(make migrate-up*)",
