@@ -199,9 +199,19 @@ and arrives in later slices:
 - **Chat** — no per-Event chat surface yet.
 - **Ratings** — Attendees cannot rate Hosts (or vice versa) post-Event.
 - **Friends** — no friend graph; Commits don't surface social proof.
-- **Notifications** — no push or local notifications on commit-state changes.
-- **Reputation surface** — no reputation badge on profiles or pins; the
-  `reputation` table lands in #35 and the rep-gated Commit path in #38.
+- **Notifications** — server-originated notifications are deferred. The
+  at-Done feedback ping in #35 is a local notification scheduled by iOS at
+  check-in time; APNs / re-engagement nudges arrive when Apple Developer
+  Program enrollment lands (#12) and the followup APNs slice ships.
+- **Reputation cache** — the `reputation` table and `RecomputeReputation`
+  ship in #35 (Done-handler fan-out + hard-flag fan-out + 24hr stale
+  refresh). The rep-gated Commit path lands in #38. Wave-2 specifics:
+  - **`'flake'` outcomes are absent** until Withdraw classification lands.
+    `RecomputeReputation` treats them as zero, so flaky-but-not-Ghost
+    behaviour doesn't move the score yet.
+  - **Host reputation is deferred.** `reputation.host_score` /
+    `host_event_count` stay NULL / 0 — the host-rep slice extends
+    `RecomputeReputation` to read host outcomes when it ships.
 - **Edits post-creation** — `POST /events` is the only event-write today.
   Title, description, Cap (loosen-only), and gating rules (loosen-only)
   become editable pre-Live in a later slice (PRD §Lifecycle).

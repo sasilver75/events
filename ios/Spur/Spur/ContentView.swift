@@ -4,11 +4,16 @@ import SwiftUI
 struct ContentView: View {
   @Environment(AuthModel.self) private var auth
   @State private var location = LocationManager()
+  // FeedbackPresenter.shared is the singleton bridge from
+  // UNUserNotificationCenterDelegate (which lives outside the SwiftUI
+  // view tree) to a sheet presented inside the tree.
+  @State private var feedback = FeedbackPresenter.shared
 
   @State private var events: [NearbyEvent] = []
   @State private var hasFetched = false
   @State private var fetchError: String?
   @State private var selectedEvent: NearbyEvent?
+  @State private var feedbackEventID: String?
 
   @State private var showingPermissionPrompt = false
   @State private var showingAttribution = false
@@ -29,6 +34,7 @@ struct ContentView: View {
     let id = UUID()
     let center: CLLocationCoordinate2D
   }
+  private struct FeedbackSheetRequest: Identifiable { let id: String }
 
   // 50 km from the requested center comfortably covers LA metro at v0 scale,
   // so a single fetch on map appear is enough — no viewport-based refetch
@@ -100,17 +106,40 @@ struct ContentView: View {
       .interactiveDismissDisabled()
     }
     .sheet(item: $selectedEvent) { event in
-      EventDetailSheet(event: event) { commitCount, committedByMe in
-        if let idx = events.firstIndex(where: { $0.id == event.id }) {
-          events[idx].commitCount = commitCount
-          events[idx].committedByMe = committedByMe
+      EventDetailSheet(
+        event: event,
+        onCommitStateChanged: { commitCount, committedByMe in
+          if let idx = events.firstIndex(where: { $0.id == event.id }) {
+            events[idx].commitCount = commitCount
+            events[idx].committedByMe = committedByMe
+          }
+        },
+        onCheckedIn: {
+          if let idx = events.firstIndex(where: { $0.id == event.id }) {
+            events[idx].checkedInByMe = true
+          }
         }
-      }
+      )
     }
     .sheet(item: $createSheetRequest) { request in
       CreateEventSheet(
         initialCenter: request.center,
         onCreated: { Task { await refetchAfterCreate() } })
+    }
+    .sheet(
+      item: Binding(
+        get: { feedbackEventID.map { FeedbackSheetRequest(id: $0) } },
+        set: { feedbackEventID = $0?.id })
+    ) { req in
+      FeedbackSheet(eventID: req.id)
+    }
+    .onChange(of: feedback.pendingEventID) { _, eventID in
+      // Drain the singleton: assigning to feedbackEventID presents the
+      // sheet; clearing pendingEventID lets a future tap re-trigger.
+      if let eventID {
+        feedbackEventID = eventID
+        feedback.pendingEventID = nil
+      }
     }
     .alert(
       "Server probe",
@@ -247,6 +276,16 @@ struct ContentView: View {
       events = result
       fetchError = nil
       hasFetched = true
+      // Cancel any pending end-of-event reminders for events the server
+      // now reports as Cancelled. Without this, a host-cancel between
+      // check-in and end_time would still ping the user (issue #35 AC).
+      // The server's browse query already excludes Cancelled events from
+      // the default "Live now" filter, so the practical signal is "this
+      // event has dropped from the result set"; we only see the
+      // explicit Cancelled state when the user widens the window.
+      for ev in result where ev.state == "Cancelled" {
+        NotificationScheduler.cancelEndOfEventReminder(eventID: ev.id)
+      }
     } catch is CancellationError {
       return
     } catch let urlErr as URLError where urlErr.code == .cancelled {

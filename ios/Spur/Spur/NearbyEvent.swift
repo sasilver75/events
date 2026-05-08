@@ -17,6 +17,7 @@ struct NearbyEvent: Decodable, Identifiable, Hashable {
   let cap: Int?
   var commitCount: Int
   var committedByMe: Bool
+  var checkedInByMe: Bool
   let state: String
   let bannerPath: String?
 
@@ -27,6 +28,7 @@ struct NearbyEvent: Decodable, Identifiable, Hashable {
     case lat, lon, cap
     case commitCount = "commit_count"
     case committedByMe = "committed_by_me"
+    case checkedInByMe = "checked_in_by_me"
     case state
     case bannerPath = "banner_path"
   }

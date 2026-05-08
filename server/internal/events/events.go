@@ -62,6 +62,7 @@ type nearbyEvent struct {
 	Cap           *int      `json:"cap"`
 	CommitCount   int       `json:"commit_count"`
 	CommittedByMe bool      `json:"committed_by_me"`
+	CheckedInByMe bool      `json:"checked_in_by_me"`
 	State         string    `json:"state"`
 	BannerPath    *string   `json:"banner_path,omitempty"`
 }
@@ -125,11 +126,14 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 			e.cap,
 			(SELECT count(*) FROM public.commits cc WHERE cc.event_id = e.id) AS commit_count,
 			(c.user_id IS NOT NULL) AS committed_by_me,
+			(ck.user_id IS NOT NULL) AS checked_in_by_me,
 			public.event_state(e) AS state,
 			e.banner_path
 		FROM public.events e
 		LEFT JOIN public.commits c
 			ON c.event_id = e.id AND c.user_id = $3
+		LEFT JOIN public.checkins ck
+			ON ck.event_id = e.id AND ck.user_id = $3
 		WHERE
 			ST_DWithin(
 				e.geom::geography,
@@ -152,7 +156,7 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 		var e nearbyEvent
 		if err := rows.Scan(
 			&e.ID, &e.Title, &e.Description, &e.Category, &e.StartTime, &e.EndTime,
-			&e.Lat, &e.Lon, &e.Cap, &e.CommitCount, &e.CommittedByMe, &e.State,
+			&e.Lat, &e.Lon, &e.Cap, &e.CommitCount, &e.CommittedByMe, &e.CheckedInByMe, &e.State,
 			&e.BannerPath,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan: "+err.Error())

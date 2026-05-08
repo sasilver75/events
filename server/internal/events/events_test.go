@@ -36,6 +36,7 @@ type nearbyEvent struct {
 	Cap           *int      `json:"cap"`
 	CommitCount   int       `json:"commit_count"`
 	CommittedByMe bool      `json:"committed_by_me"`
+	CheckedInByMe bool      `json:"checked_in_by_me"`
 	State         string    `json:"state"`
 }
 
@@ -287,6 +288,38 @@ func TestNearbyEventsEndpoint(t *testing.T) {
 		}
 		if !got.CommittedByMe {
 			t.Errorf("committed_by_me: got false, want true (viewer Committed)")
+		}
+	})
+
+	t.Run("checked_in_by_me reflects checkins row", func(t *testing.T) {
+		_, body := get(t, "near=34.0522,-118.2437&radius_m=30000")
+		got := pickByID(body, publicEvent.id)
+		if got == nil {
+			t.Fatalf("public event %s missing from response", publicEvent.id)
+		}
+		if got.CheckedInByMe {
+			t.Errorf("checked_in_by_me: got true, want false (no checkins row)")
+		}
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO public.checkins (event_id, user_id) VALUES ($1, $2)
+			 ON CONFLICT DO NOTHING`,
+			publicEvent.id, viewerID,
+		); err != nil {
+			t.Fatalf("insert checkin: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx,
+				`DELETE FROM public.checkins WHERE event_id = $1 AND user_id = $2`,
+				publicEvent.id, viewerID,
+			)
+		})
+		_, body = get(t, "near=34.0522,-118.2437&radius_m=30000")
+		got = pickByID(body, publicEvent.id)
+		if got == nil {
+			t.Fatalf("public event %s missing from response", publicEvent.id)
+		}
+		if !got.CheckedInByMe {
+			t.Errorf("checked_in_by_me: got false, want true (checkins row present)")
 		}
 	})
 
