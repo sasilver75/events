@@ -47,6 +47,17 @@ struct FeedbackSheet: View {
   static let softReasonKey = "just_didnt_like_them"
   static let softReasonLabel = "I just didn't like them"
 
+  // A 👎 with no reason is rejected on Submit because the gap between
+  // "I had a bad time" (soft) and "I would not attend with this person
+  // again" (hard) is the load-bearing distinction in ADR 0008's
+  // flag_factor — leaving it unspecified makes the rating ambiguous and
+  // tempts a future reader to guess at intent. The user must commit to
+  // *what* they didn't like (any of the 4 reasons works; soft still
+  // captures the bundled-feedback display without moving the score).
+  private var hasReasonlessDown: Bool {
+    selections.values.contains { $0.signal == "down" && $0.reasons.isEmpty }
+  }
+
   var body: some View {
     NavigationStack {
       Group {
@@ -92,7 +103,7 @@ struct FeedbackSheet: View {
                   .fontWeight(.semibold)
               }
             }
-            .disabled(submitting || selections.isEmpty)
+            .disabled(submitting || selections.isEmpty || hasReasonlessDown)
           }
         }
       }
@@ -195,17 +206,20 @@ struct FeedbackSheet: View {
 
   private func reasonsBadge(for targetID: String, reasons: Set<String>) -> some View {
     let count = reasons.count
+    let missing = count == 0
     let label: String =
-      count == 0
-      ? "Add reasons (optional)"
+      missing
+      ? "Pick a reason"
       : "\(count) reason\(count == 1 ? "" : "s")"
     return Button(action: { reasoningFor = targetID }) {
       HStack(spacing: 4) {
-        Image(systemName: "line.3.horizontal.decrease.circle")
+        Image(
+          systemName: missing
+            ? "exclamationmark.triangle.fill" : "line.3.horizontal.decrease.circle")
         Text(label)
       }
       .font(.caption)
-      .foregroundStyle(.secondary)
+      .foregroundStyle(missing ? .orange : .secondary)
     }
     .buttonStyle(.plain)
   }
