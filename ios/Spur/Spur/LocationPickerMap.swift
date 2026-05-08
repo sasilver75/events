@@ -11,6 +11,7 @@ struct LocationPickerMap: UIViewRepresentable {
   let styleURL: URL
   let initialCenter: CLLocationCoordinate2D
   @Binding var coordinate: CLLocationCoordinate2D
+  var recenterTrigger: Int = 0
 
   func makeCoordinator() -> Coordinator {
     Coordinator(coordinate: $coordinate)
@@ -36,12 +37,17 @@ struct LocationPickerMap: UIViewRepresentable {
 
   func updateUIView(_ uiView: MLNMapView, context: Context) {
     context.coordinator.placeAnnotation(at: coordinate, on: uiView)
+    if context.coordinator.lastRecenterTrigger != recenterTrigger {
+      context.coordinator.lastRecenterTrigger = recenterTrigger
+      uiView.setCenter(coordinate, zoomLevel: uiView.zoomLevel, animated: true)
+    }
   }
 
   final class Coordinator: NSObject, MLNMapViewDelegate, UIGestureRecognizerDelegate {
     private var coordinateBinding: Binding<CLLocationCoordinate2D>
     private weak var mapView: MLNMapView?
     private var annotation: PickAnnotation?
+    var lastRecenterTrigger: Int = 0
 
     init(coordinate: Binding<CLLocationCoordinate2D>) {
       self.coordinateBinding = coordinate

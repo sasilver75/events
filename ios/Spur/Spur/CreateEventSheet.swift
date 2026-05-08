@@ -1,4 +1,5 @@
 import CoreLocation
+import MapKit
 import PhotosUI
 import SwiftUI
 
@@ -53,6 +54,10 @@ struct CreateEventSheet: View {
   @State private var bannerPickerItem: PhotosPickerItem?
   @State private var bannerPreview: UIImage?
   @State private var bannerJPEG: Data?
+
+  @State private var pinHint: String?
+  @State private var recenterTrigger: Int = 0
+  private let geocoder: GeocodingService = AppleGeocodingService()
 
   init(initialCenter: CLLocationCoordinate2D, onCreated: @escaping () -> Void) {
     self.initialCenter = initialCenter
@@ -160,20 +165,38 @@ struct CreateEventSheet: View {
         }
 
         Section("Where") {
+          LocationSearchField(
+            region: searchRegion,
+            geocoder: geocoder
+          ) { result in
+            pinCoordinate = result.coordinate
+            pinHint =
+              result.subtitle.isEmpty ? result.title : "\(result.title) · \(result.subtitle)"
+            recenterTrigger &+= 1
+          }
+          .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 0, trailing: 8))
           LocationPickerMap(
             styleURL: Bundle.main.mapStyleLightURL,
             initialCenter: initialCenter,
-            coordinate: $pinCoordinate
+            coordinate: $pinCoordinate,
+            recenterTrigger: recenterTrigger
           )
           .frame(height: 220)
           .clipShape(RoundedRectangle(cornerRadius: 12))
           .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+          if let hint = pinHint, !hint.isEmpty {
+            Text(hint)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .accessibilityIdentifier("create.locationHint")
+          }
           Text(formatCoord(pinCoordinate))
             .font(.caption.monospaced())
             .foregroundStyle(.secondary)
           Toggle("Hide exact location until people Commit", isOn: $visibilityFuzzed)
             .accessibilityIdentifier("create.fuzzed")
         }
+        .task(id: pinCoordinateKey) { await refreshPinHint(for: pinCoordinate) }
 
         Section("Cap") {
           Toggle("Cap attendance", isOn: $capEnabled)
@@ -334,5 +357,20 @@ struct CreateEventSheet: View {
 
   private func formatCoord(_ c: CLLocationCoordinate2D) -> String {
     String(format: "Pin: %.5f, %.5f", c.latitude, c.longitude)
+  }
+
+  private var pinCoordinateKey: String {
+    "\(pinCoordinate.latitude),\(pinCoordinate.longitude)"
+  }
+
+  private var searchRegion: MKCoordinateRegion {
+    MKCoordinateRegion(
+      center: pinCoordinate,
+      span: MKCoordinateSpan(latitudeDelta: 0.4, longitudeDelta: 0.4))
+  }
+
+  private func refreshPinHint(for coord: CLLocationCoordinate2D) async {
+    let resolved = await geocoder.reverseGeocode(coord)
+    pinHint = resolved
   }
 }

@@ -5,9 +5,10 @@
 -- public URLs at read time via the storage SDK. Nullable: banner is
 -- optional and α-/β-Events both render a category-color fallback.
 --
--- The bucket itself (event-banners, public-read, 2 MiB cap) is
--- declared in supabase/config.toml.template; storage RLS lives in
--- 0013_event_banners_storage.
+-- The bucket and storage RLS for event-banners are in
+-- 0015_event_banners_storage_rls (the bucket itself is created via
+-- INSERT into storage.buckets there, with ON CONFLICT DO UPDATE so
+-- it's idempotent across fresh and existing volumes).
 
 ALTER TABLE public.events
     ADD COLUMN banner_path TEXT;
