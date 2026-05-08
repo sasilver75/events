@@ -88,6 +88,9 @@ node_modules/
 # Claude Code worktrees (ephemeral agent checkouts)
 .claude/worktrees/
 
+# Claude Code session-local state (lock files, etc.)
+.claude/scheduled_tasks.lock
+
 # Misc
 *.bak
 *.tmp
