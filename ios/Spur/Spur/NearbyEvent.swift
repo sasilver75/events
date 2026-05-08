@@ -18,6 +18,7 @@ struct NearbyEvent: Decodable, Identifiable, Hashable {
   var commitCount: Int
   var committedByMe: Bool
   let state: String
+  let bannerPath: String?
 
   enum CodingKeys: String, CodingKey {
     case id, title, description, category
@@ -27,6 +28,7 @@ struct NearbyEvent: Decodable, Identifiable, Hashable {
     case commitCount = "commit_count"
     case committedByMe = "committed_by_me"
     case state
+    case bannerPath = "banner_path"
   }
 
   var coordinate: CLLocationCoordinate2D {

@@ -1,5 +1,34 @@
 import CoreLocation
 import Foundation
+import Supabase
+
+// Banner image upload + public-URL resolution for the event-banners
+// bucket (#41). The bucket is public-read so we can use getPublicURL
+// directly — no signed-URL ceremony, and the Supabase CDN can cache.
+//
+// Path layout: "{userID}/{uuid}.jpg". The leading user-id segment is
+// what storage RLS keys against (storage.foldername(name)[1] =
+// auth.uid()::text), so anyone can read but only the owner can write
+// under their prefix.
+enum BannerStorage {
+  static let bucket = "event-banners"
+
+  static func upload(jpegData: Data, userID: UUID) async throws -> String {
+    let path = "\(userID.uuidString.lowercased())/\(UUID().uuidString.lowercased()).jpg"
+    _ = try await SupabaseConfig.shared.storage
+      .from(bucket)
+      .upload(
+        path,
+        data: jpegData,
+        options: FileOptions(contentType: "image/jpeg", upsert: false)
+      )
+    return path
+  }
+
+  static func publicURL(forPath path: String) -> URL? {
+    try? SupabaseConfig.shared.storage.from(bucket).getPublicURL(path: path)
+  }
+}
 
 enum EventsAPI {
   enum APIError: LocalizedError {
@@ -99,6 +128,7 @@ enum EventsAPI {
     // without a round-trip.
     let tipThreshold: Int?
     let tipDeadline: Date?
+    let bannerPath: String?
 
     enum CodingKeys: String, CodingKey {
       case title, description, category
@@ -108,6 +138,7 @@ enum EventsAPI {
       case locationVisibility = "location_visibility"
       case tipThreshold = "tip_threshold"
       case tipDeadline = "tip_deadline"
+      case bannerPath = "banner_path"
     }
   }
 

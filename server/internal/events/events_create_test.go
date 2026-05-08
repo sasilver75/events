@@ -32,6 +32,7 @@ type createdEvent struct {
 	LocationVisibility string     `json:"location_visibility"`
 	TipThreshold       *int       `json:"tip_threshold,omitempty"`
 	TipDeadline        *time.Time `json:"tip_deadline,omitempty"`
+	BannerPath         *string    `json:"banner_path,omitempty"`
 }
 
 func TestCreateEventEndpoint(t *testing.T) {
@@ -351,6 +352,53 @@ func TestCreateEventEndpoint(t *testing.T) {
 		}
 		if hasCommit {
 			t.Errorf("α create must not auto-commit the Host")
+		}
+	})
+
+	t.Run("banner_path round-trips when provided", func(t *testing.T) {
+		body := validBody()
+		bannerPath := hostID + "/test-banner.jpg"
+		body["banner_path"] = bannerPath
+		rec := post(t, body, true)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		var got createdEvent
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v: %s", err, rec.Body.String())
+		}
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, `DELETE FROM public.events WHERE id = $1`, got.ID)
+		})
+		if got.BannerPath == nil {
+			t.Fatalf("banner_path missing in response: %s", rec.Body.String())
+		}
+		if *got.BannerPath != bannerPath {
+			t.Errorf("banner_path: got %q, want %q", *got.BannerPath, bannerPath)
+		}
+		var stored *string
+		if err := pool.QueryRow(ctx,
+			`SELECT banner_path FROM public.events WHERE id = $1`, got.ID,
+		).Scan(&stored); err != nil {
+			t.Fatalf("query stored row: %v", err)
+		}
+		if stored == nil || *stored != bannerPath {
+			t.Errorf("stored banner_path: got %v, want %q", stored, bannerPath)
+		}
+	})
+
+	t.Run("banner_path is null when omitted", func(t *testing.T) {
+		rec := post(t, validBody(), true)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		var got createdEvent
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, `DELETE FROM public.events WHERE id = $1`, got.ID)
+		})
+		if got.BannerPath != nil {
+			t.Errorf("expected null banner_path, got %q", *got.BannerPath)
 		}
 	})
 }

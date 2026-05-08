@@ -200,6 +200,23 @@ and arrives in later slices:
 - **Rep-gating (`rep ≥ X`)** — carved out to #38; depends on the
   `reputation` table from #35.
 - **Friends-only gating** — depends on the friend system; not yet sliced.
+- **Event banner storage** — the `event-banners` bucket (#41) is public-read,
+  with a 2 MiB per-file cap and `image/jpeg|png|heic|webp` MIME allowlist. The
+  following are deliberately deferred and are upgrade-before-distribution:
+  - **Egress rate limiting.** Public-read means anonymous GETs; Supabase
+    Storage has no native per-IP/per-token throttling on the CDN. Drop a
+    Cloudflare Worker in front of the bucket using the same playbook as
+    [ADR 0021](../docs/adr/0021-self-hosted-pmtiles-cloudflare-worker.md).
+  - **Project spend cap.** Configure a hard egress/cost ceiling on the
+    Supabase project so a flood degrades service rather than billing.
+  - **Image transformation.** Supabase's edge transform API is paywalled to
+    Pro; we currently upload a client-side JPEG re-encode at 0.85 quality
+    and serve as-is.
+  - **Content moderation.** No scanning on upload. Host accountability is
+    the only signal today.
+  - **Orphan-banner GC.** If `POST /events` fails after a successful
+    upload, the object is left in the bucket. A periodic sweep (objects
+    not referenced by any `events.banner_path`) is not yet wired.
 
 ## Deploy-order discipline
 

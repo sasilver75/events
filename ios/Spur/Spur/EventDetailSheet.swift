@@ -30,34 +30,68 @@ struct EventDetailSheet: View {
   var body: some View {
     NavigationStack {
       ScrollView {
-        VStack(alignment: .leading, spacing: 16) {
-          header
-          metaRow
-          commitButton
-          if let errorMessage {
-            Text(errorMessage)
-              .font(.footnote)
-              .foregroundStyle(.red)
-          }
-          if showCheckIn {
-            checkInButton
-            if let checkInError {
-              Text(checkInError)
+        VStack(alignment: .leading, spacing: 0) {
+          banner
+          VStack(alignment: .leading, spacing: 16) {
+            header
+            metaRow
+            commitButton
+            if let errorMessage {
+              Text(errorMessage)
                 .font(.footnote)
                 .foregroundStyle(.red)
             }
+            if showCheckIn {
+              checkInButton
+              if let checkInError {
+                Text(checkInError)
+                  .font(.footnote)
+                  .foregroundStyle(.red)
+              }
+            }
+            Divider()
+            description
           }
-          Divider()
-          description
+          .padding(.horizontal, 20)
+          .padding(.top, 20)
+          .padding(.bottom, 24)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 28)
-        .padding(.bottom, 24)
       }
       .scrollIndicators(.hidden)
     }
     .presentationDetents([.medium, .large])
     .presentationDragIndicator(.visible)
+  }
+
+  // Hero banner. Public-read bucket means a plain AsyncImage works —
+  // no auth headers, no signed URLs, the Supabase CDN caches by URL.
+  // When no banner is set, fall back to a category-color block so the
+  // detail surface still has a hero.
+  @ViewBuilder
+  private var banner: some View {
+    if let path = event.bannerPath, let url = BannerStorage.publicURL(forPath: path) {
+      AsyncImage(url: url) { phase in
+        switch phase {
+        case .success(let image):
+          image.resizable().scaledToFill()
+        case .failure:
+          bannerFallback
+        case .empty:
+          bannerFallback.overlay(ProgressView())
+        @unknown default:
+          bannerFallback
+        }
+      }
+      .frame(height: 180)
+      .frame(maxWidth: .infinity)
+      .clipped()
+    } else {
+      bannerFallback.frame(height: 120)
+    }
+  }
+
+  private var bannerFallback: some View {
+    event.categoryEnum.color.opacity(0.85)
   }
 
   private var header: some View {

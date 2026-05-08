@@ -122,6 +122,17 @@ file_size_limit = "50MiB"
 # allowed_mime_types = ["image/png", "image/jpeg"]
 # objects_path = "./images"
 
+# Hero image for an Event detail surface (#41). Public-read so the
+# Supabase CDN can cache effectively; signed URLs would defeat the
+# cache and add latency to the browse hot path. Per-file cap is 2 MiB
+# to bound egress-flood damage — the broader rate-limit story (CF
+# Worker per ADR 0021, project spend cap) is in server/README.md
+# Wave-2 limitations.
+[storage.buckets.event-banners]
+public = true
+file_size_limit = "2MiB"
+allowed_mime_types = ["image/jpeg", "image/png", "image/heic", "image/webp"]
+
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]
 enabled = true
