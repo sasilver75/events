@@ -357,6 +357,149 @@ func TestResolveDoneEventOutcomes(t *testing.T) {
 	})
 }
 
+// TestDoneFanOutToReputation verifies that when the Done poller writes
+// outcome rows for a fresh user, that user gets a reputation row in the
+// same tick (PRD §Reputation system §Recompute cadence).
+func TestDoneFanOutToReputation(t *testing.T) {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("DATABASE_URL not set; integration test requires a real Postgres")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("pgx pool: %v", err)
+	}
+	defer pool.Close()
+
+	hostID := requireSeedHost(ctx, t, pool)
+	runner := lifecycle.New(pool)
+
+	var eventID string
+	err = pool.QueryRow(ctx, `
+		INSERT INTO public.events (
+			host_id, title, description, category,
+			start_time, end_time, cap,
+			geom, source, location_visibility
+		) VALUES (
+			$1, 'rep-fanout test', 'rep-fanout test', 'Other',
+			now() - interval '2 hours', now() - interval '1 hour', 8,
+			ST_SetSRID(ST_MakePoint(-118.2437, 34.0522), 4326),
+			'curated', 'public'
+		) RETURNING id
+	`, hostID).Scan(&eventID)
+	if err != nil {
+		t.Fatalf("insert event: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM public.attendance_outcomes WHERE event_id = $1`, eventID)
+		_, _ = pool.Exec(ctx, `DELETE FROM public.commits WHERE event_id = $1`, eventID)
+		_, _ = pool.Exec(ctx, `DELETE FROM public.events WHERE id = $1`, eventID)
+	})
+
+	var userID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO auth.users (id, email)
+		VALUES (gen_random_uuid(), gen_random_uuid()::text || '@test.local')
+		RETURNING id
+	`).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM public.reputation WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM auth.users WHERE id = $1`, userID)
+	})
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO public.commits (event_id, user_id) VALUES ($1, $2)`,
+		eventID, userID,
+	); err != nil {
+		t.Fatalf("insert commit: %v", err)
+	}
+
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	var score int
+	if err := pool.QueryRow(ctx,
+		`SELECT attendee_score FROM public.reputation WHERE user_id = $1`, userID,
+	).Scan(&score); err != nil {
+		t.Fatalf("expected reputation row after Done fan-out: %v", err)
+	}
+	// One Ghost outcome → α=4, β=4 → 50.
+	if score < 45 || score > 55 {
+		t.Errorf("score after Ghost fan-out: got %d, want ~50", score)
+	}
+}
+
+// TestRefreshStaleReputations verifies the daily-cadence sweep: a row
+// whose last_recomputed_at is older than 24hr is recomputed; a fresh row
+// is left alone.
+func TestRefreshStaleReputations(t *testing.T) {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("DATABASE_URL not set; integration test requires a real Postgres")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("pgx pool: %v", err)
+	}
+	defer pool.Close()
+
+	runner := lifecycle.New(pool)
+
+	mkUser := func(t *testing.T) string {
+		t.Helper()
+		var id string
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO auth.users (id, email)
+			VALUES (gen_random_uuid(), gen_random_uuid()::text || '@test.local')
+			RETURNING id
+		`).Scan(&id); err != nil {
+			t.Fatalf("insert user: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, `DELETE FROM public.reputation WHERE user_id = $1`, id)
+			_, _ = pool.Exec(ctx, `DELETE FROM auth.users WHERE id = $1`, id)
+		})
+		return id
+	}
+
+	staleUser := mkUser(t)
+	freshUser := mkUser(t)
+
+	// Seed both as if RecomputeReputation had run before — but with
+	// last_recomputed_at far in the past for stale, recent for fresh.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO public.reputation (user_id, attendee_score, last_recomputed_at)
+		VALUES ($1, 50, now() - interval '48 hours'),
+		       ($2, 50, now() - interval '1 hour')
+	`, staleUser, freshUser); err != nil {
+		t.Fatalf("seed reputation: %v", err)
+	}
+
+	if err := runner.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	var staleAt, freshAt time.Time
+	_ = pool.QueryRow(ctx,
+		`SELECT last_recomputed_at FROM public.reputation WHERE user_id = $1`, staleUser,
+	).Scan(&staleAt)
+	_ = pool.QueryRow(ctx,
+		`SELECT last_recomputed_at FROM public.reputation WHERE user_id = $1`, freshUser,
+	).Scan(&freshAt)
+
+	if time.Since(staleAt) > 1*time.Minute {
+		t.Errorf("stale reputation row not refreshed: last_recomputed_at = %v", staleAt)
+	}
+	if time.Since(freshAt) < 30*time.Minute {
+		t.Errorf("fresh reputation row should not have been touched, but was: last_recomputed_at = %v", freshAt)
+	}
+}
+
 func requireSeedHost(ctx context.Context, t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	var id string

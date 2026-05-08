@@ -4,6 +4,7 @@ import SwiftUI
 struct EventDetailSheet: View {
   let event: NearbyEvent
   var onCommitStateChanged: (_ commitCount: Int, _ committedByMe: Bool) -> Void = { _, _ in }
+  var onCheckedIn: () -> Void = {}
 
   @Environment(AuthModel.self) private var auth
 
@@ -12,19 +13,29 @@ struct EventDetailSheet: View {
   @State private var inFlight = false
   @State private var errorMessage: String?
 
-  @State private var checkedIn = false
+  // Seeded from the server-side `checked_in_by_me` projection so
+  // re-presenting the sheet after dismissal reflects the persisted state
+  // — without this seed, the local @State resets to false and the button
+  // appears tappable again. The post-tap onCheckedIn callback updates the
+  // parent's events array so the next presentation reads the right value
+  // from `event.checkedInByMe` even before the next browse refetch.
+  @State private var checkedIn: Bool
   @State private var checkInInFlight = false
   @State private var checkInError: String?
 
   init(
     event: NearbyEvent,
-    onCommitStateChanged: @escaping (_ commitCount: Int, _ committedByMe: Bool) -> Void = { _, _ in
-    }
+    onCommitStateChanged: @escaping (_ commitCount: Int, _ committedByMe: Bool) -> Void = {
+      _, _ in
+    },
+    onCheckedIn: @escaping () -> Void = {}
   ) {
     self.event = event
     self.onCommitStateChanged = onCommitStateChanged
+    self.onCheckedIn = onCheckedIn
     _commitCount = State(initialValue: event.commitCount)
     _committedByMe = State(initialValue: event.committedByMe)
+    _checkedIn = State(initialValue: event.checkedInByMe)
   }
 
   var body: some View {
@@ -267,6 +278,15 @@ struct EventDetailSheet: View {
         lon: fix.coordinate.longitude,
         horizontalAccuracyM: fix.horizontalAccuracy,
         auth: auth)
+      // Permission request is gated to first check-in (PRD §31, issue #35
+      // — not at app launch) so the prompt lands in the moment that
+      // motivates it. Idempotent if the user already granted/denied.
+      await NotificationScheduler.requestAuthorizationIfNeeded()
+      await NotificationScheduler.scheduleEndOfEventReminder(
+        eventID: event.id,
+        eventTitle: event.title,
+        endTime: event.endTime)
+      onCheckedIn()
     } catch let error as EventsAPI.APIError {
       checkedIn = priorChecked
       checkInError = error.errorDescription

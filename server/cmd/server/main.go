@@ -22,6 +22,7 @@ import (
 	"github.com/sasilver75/events/server/internal/checkins"
 	"github.com/sasilver75/events/server/internal/commits"
 	"github.com/sasilver75/events/server/internal/events"
+	"github.com/sasilver75/events/server/internal/feedback"
 	"github.com/sasilver75/events/server/internal/friends"
 	"github.com/sasilver75/events/server/internal/lifecycle"
 )
@@ -63,6 +64,7 @@ func main() {
 	eventsHandler := events.New(pool)
 	commitsHandler := commits.New(pool)
 	checkinsHandler := checkins.New(pool)
+	feedbackHandler := feedback.New(pool)
 	friendsHandler := friends.New(pool)
 
 	// --- background lifecycle loop ---
@@ -87,6 +89,8 @@ func main() {
 		r.Post("/events/{id}/commit", commitsHandler.Commit)
 		r.Delete("/events/{id}/commit", commitsHandler.Withdraw)
 		r.Post("/events/{id}/checkin", checkinsHandler.CheckIn)
+		r.Get("/events/{id}/feedback", feedbackHandler.List)
+		r.Post("/events/{id}/feedback", feedbackHandler.Submit)
 
 		r.Get("/friends", friendsHandler.ListFriends)
 		r.Delete("/friends/{friend_id}", friendsHandler.Unfriend)

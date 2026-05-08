@@ -298,6 +298,146 @@ enum EventsAPI {
       throw APIError.decode(error.localizedDescription)
     }
   }
+
+  // Post-event feedback (#35). The flow has two calls:
+  //   - feedbackTargets(eventID:) → [(id, displayName)] of fellow Show
+  //     attendees the caller can rate, plus any prior submissions so the
+  //     sheet can render the current state without per-row round trips.
+  //   - submitFeedback(eventID:, signals:) posts the batch.
+
+  struct FeedbackTarget: Decodable, Identifiable {
+    let id: String
+    let displayName: String
+
+    enum CodingKeys: String, CodingKey {
+      case id = "user_id"
+      case displayName = "display_name"
+    }
+  }
+
+  struct FeedbackSubmission: Decodable {
+    let targetUserID: String
+    let signal: String
+    let reasons: [String]
+
+    enum CodingKeys: String, CodingKey {
+      case targetUserID = "target_user_id"
+      case signal
+      case reasons
+    }
+  }
+
+  struct FeedbackList: Decodable {
+    let windowClosesAt: Date
+    let targets: [FeedbackTarget]
+    let submitted: [FeedbackSubmission]
+
+    enum CodingKeys: String, CodingKey {
+      case windowClosesAt = "window_closes_at"
+      case targets
+      case submitted
+    }
+  }
+
+  enum FeedbackError: LocalizedError {
+    case windowClosed
+    case notShowAttendee
+
+    var errorDescription: String? {
+      switch self {
+      case .windowClosed: return "Feedback window has closed for this Event."
+      case .notShowAttendee:
+        return "Only attendees who showed up can leave feedback."
+      }
+    }
+  }
+
+  static func fetchFeedback(eventID: String, auth: AuthModel) async throws -> FeedbackList {
+    guard let token = await auth.accessToken() else { throw APIError.noToken }
+    let url = SupabaseConfig.serverURL
+      .appendingPathComponent("events")
+      .appendingPathComponent(eventID)
+      .appendingPathComponent("feedback")
+
+    var req = URLRequest(url: url)
+    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let data: Data
+    let resp: URLResponse
+    do {
+      (data, resp) = try await URLSession.shared.data(for: req)
+    } catch {
+      throw APIError.transport(error.localizedDescription)
+    }
+    let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+    switch code {
+    case 200: break
+    case 410: throw FeedbackError.windowClosed
+    case 403: throw FeedbackError.notShowAttendee
+    default:
+      throw APIError.http(code, String(data: data, encoding: .utf8) ?? "")
+    }
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601withFractionalSeconds
+    do {
+      return try decoder.decode(FeedbackList.self, from: data)
+    } catch {
+      throw APIError.decode(error.localizedDescription)
+    }
+  }
+
+  // FeedbackSignal is the request shape for a single per-target rating.
+  // `reasons` is omitted from JSON when nil (the server tolerates an
+  // empty array but rejects non-empty reasons on `up`/`skip`).
+  struct FeedbackSignal: Encodable {
+    let targetUserID: String
+    let signal: String
+    let reasons: [String]?
+
+    enum CodingKeys: String, CodingKey {
+      case targetUserID = "target_user_id"
+      case signal
+      case reasons
+    }
+  }
+
+  static func submitFeedback(
+    eventID: String, signals: [FeedbackSignal], auth: AuthModel
+  ) async throws {
+    guard let token = await auth.accessToken() else { throw APIError.noToken }
+    let url = SupabaseConfig.serverURL
+      .appendingPathComponent("events")
+      .appendingPathComponent(eventID)
+      .appendingPathComponent("feedback")
+
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+    struct Body: Encodable { let signals: [FeedbackSignal] }
+    do {
+      req.httpBody = try JSONEncoder().encode(Body(signals: signals))
+    } catch {
+      throw APIError.transport("encode body: \(error.localizedDescription)")
+    }
+
+    let data: Data
+    let resp: URLResponse
+    do {
+      (data, resp) = try await URLSession.shared.data(for: req)
+    } catch {
+      throw APIError.transport(error.localizedDescription)
+    }
+    let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+    switch code {
+    case 200: return
+    case 410: throw FeedbackError.windowClosed
+    case 403: throw FeedbackError.notShowAttendee
+    default:
+      throw APIError.http(code, String(data: data, encoding: .utf8) ?? "")
+    }
+  }
 }
 
 // Postgres TIMESTAMPTZ marshals as RFC3339 with fractional seconds (e.g.
