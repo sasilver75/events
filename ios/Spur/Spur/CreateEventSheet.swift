@@ -1,5 +1,6 @@
 import CoreLocation
 import MapKit
+import PhotosUI
 import SwiftUI
 
 // CreateEventSheet collects the input for an Event and posts it via
@@ -46,6 +47,14 @@ struct CreateEventSheet: View {
   @State private var submitting: Bool = false
   @State private var submitError: String?
 
+  // Banner picker state. The picker yields a PhotosPickerItem; we
+  // resolve it to JPEG Data via .loadTransferable for upload, and
+  // separately to a UIImage for in-form preview. Upload itself is
+  // deferred to submit() so the user can add/remove freely.
+  @State private var bannerPickerItem: PhotosPickerItem?
+  @State private var bannerPreview: UIImage?
+  @State private var bannerJPEG: Data?
+
   @State private var pinHint: String?
   @State private var recenterTrigger: Int = 0
   private let geocoder: GeocodingService = AppleGeocodingService()
@@ -84,6 +93,37 @@ struct CreateEventSheet: View {
           )
           .font(.caption)
           .foregroundStyle(.secondary)
+        }
+
+        Section("Banner") {
+          if let preview = bannerPreview {
+            Image(uiImage: preview)
+              .resizable()
+              .scaledToFill()
+              .frame(maxWidth: .infinity)
+              .frame(height: 160)
+              .clipShape(RoundedRectangle(cornerRadius: 12))
+              .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+              .accessibilityIdentifier("create.bannerPreview")
+            Button("Remove banner", role: .destructive) {
+              bannerPickerItem = nil
+              bannerPreview = nil
+              bannerJPEG = nil
+            }
+            .accessibilityIdentifier("create.bannerRemove")
+          } else {
+            PhotosPicker(
+              selection: $bannerPickerItem,
+              matching: .images,
+              photoLibrary: .shared()
+            ) {
+              Label("Add banner image", systemImage: "photo.badge.plus")
+            }
+            .accessibilityIdentifier("create.bannerPicker")
+            Text("Optional. Up to 2 MB, JPEG/PNG/HEIC/WebP.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
         }
 
         Section("Event") {
@@ -191,6 +231,9 @@ struct CreateEventSheet: View {
       }
       .navigationTitle("New Event")
       .navigationBarTitleDisplayMode(.inline)
+      .onChange(of: bannerPickerItem) { _, item in
+        Task { await loadBanner(from: item) }
+      }
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancel") { dismiss() }
@@ -226,6 +269,23 @@ struct CreateEventSheet: View {
     submitError = nil
     defer { submitting = false }
 
+    // Upload banner first, then POST /events. If the POST fails after
+    // the upload lands, the object is orphaned in Storage — Wave-2 GC
+    // is tracked in server/README.md.
+    var bannerPath: String?
+    if let jpeg = bannerJPEG {
+      guard let userID = auth.userID else {
+        submitError = "Not signed in"
+        return
+      }
+      do {
+        bannerPath = try await BannerStorage.upload(jpegData: jpeg, userID: userID)
+      } catch {
+        submitError = "Banner upload failed: \(error.localizedDescription)"
+        return
+      }
+    }
+
     let (thr, dl): (Int?, Date?) =
       kind == .seeded ? (tipThreshold, tipDeadline) : (nil, nil)
     let input = EventsAPI.CreateInput(
@@ -239,7 +299,8 @@ struct CreateEventSheet: View {
       cap: capEnabled ? capValue : nil,
       locationVisibility: visibilityFuzzed ? "fuzzed" : "public",
       tipThreshold: thr,
-      tipDeadline: dl)
+      tipDeadline: dl,
+      bannerPath: bannerPath)
     do {
       try await EventsAPI.create(input, auth: auth)
       onCreated()
@@ -247,6 +308,51 @@ struct CreateEventSheet: View {
     } catch {
       submitError = error.localizedDescription
     }
+  }
+
+  private func loadBanner(from item: PhotosPickerItem?) async {
+    guard let item else { return }
+    do {
+      guard let data = try await item.loadTransferable(type: Data.self) else { return }
+      guard let raw = UIImage(data: data) else {
+        submitError = "Couldn't read image"
+        return
+      }
+      // Downscale + re-encode to JPEG to (a) normalize content-type
+      // (HEIC from the camera roll otherwise mismatches what we
+      // declare) and (b) stay under the 2 MiB bucket cap. Camera-roll
+      // photos are routinely 12+ MP / 4-6 MB and the bucket rejects
+      // them with 413.
+      let resized = downscale(raw, maxDimension: 1600)
+      let jpeg = compressUnderCap(resized, capBytes: 2 * 1024 * 1024)
+      bannerPreview = resized
+      bannerJPEG = jpeg
+    } catch {
+      submitError = "Couldn't read image: \(error.localizedDescription)"
+    }
+  }
+
+  private func downscale(_ image: UIImage, maxDimension: CGFloat) -> UIImage {
+    let size = image.size
+    let longest = max(size.width, size.height)
+    guard longest > maxDimension else { return image }
+    let scale = maxDimension / longest
+    let target = CGSize(width: size.width * scale, height: size.height * scale)
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+      image.draw(in: CGRect(origin: .zero, size: target))
+    }
+  }
+
+  private func compressUnderCap(_ image: UIImage, capBytes: Int) -> Data {
+    var quality: CGFloat = 0.85
+    var data = image.jpegData(compressionQuality: quality) ?? Data()
+    while data.count > capBytes && quality > 0.3 {
+      quality -= 0.1
+      data = image.jpegData(compressionQuality: quality) ?? data
+    }
+    return data
   }
 
   private func formatCoord(_ c: CLLocationCoordinate2D) -> String {

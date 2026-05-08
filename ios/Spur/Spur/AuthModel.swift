@@ -75,4 +75,9 @@ final class AuthModel {
   func accessToken() async -> String? {
     try? await client.auth.session.accessToken
   }
+
+  var userID: UUID? {
+    if case .signedIn(let id) = phase { return id }
+    return nil
+  }
 }

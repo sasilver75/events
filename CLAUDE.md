@@ -126,7 +126,12 @@ build artifacts. Rules:
 - **Use XcodeBuildMCP for sim interaction.** Tap, swipe, screenshot, and
   accessibility-tree dumps go through XcodeBuildMCP — not raw simctl, not
   AppleScript, not pixel coordinates. Pass the worktree's pinned UDID and
-  derived-data path explicitly to every MCP call.
+  derived-data path explicitly to every MCP call. Note: SwiftUI toolbar
+  buttons inside `ToolbarItem(placement: .confirmationAction)` and
+  `.cancellationAction` don't propagate `accessibilityIdentifier` to the
+  AX tree — tap by `--label` (e.g. "Create", "Cancel") or by coordinates
+  derived from the navbar's `AXFrame`. Identifier-based targeting only
+  works for buttons in the view body itself.
 - **Pin host-level services per worktree.** Two workers `supabase start`-ing
   (or any other host-level service starting) against the same default ports
   collide. Each worktree is assigned a single `SPUR_OFFSET` and every

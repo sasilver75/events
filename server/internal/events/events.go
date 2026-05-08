@@ -63,6 +63,7 @@ type nearbyEvent struct {
 	CommitCount   int       `json:"commit_count"`
 	CommittedByMe bool      `json:"committed_by_me"`
 	State         string    `json:"state"`
+	BannerPath    *string   `json:"banner_path,omitempty"`
 }
 
 // Near handles GET /events?near=lat,lon&radius_m=…
@@ -124,7 +125,8 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 			e.cap,
 			(SELECT count(*) FROM public.commits cc WHERE cc.event_id = e.id) AS commit_count,
 			(c.user_id IS NOT NULL) AS committed_by_me,
-			public.event_state(e) AS state
+			public.event_state(e) AS state,
+			e.banner_path
 		FROM public.events e
 		LEFT JOIN public.commits c
 			ON c.event_id = e.id AND c.user_id = $3
@@ -151,6 +153,7 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(
 			&e.ID, &e.Title, &e.Description, &e.Category, &e.StartTime, &e.EndTime,
 			&e.Lat, &e.Lon, &e.Cap, &e.CommitCount, &e.CommittedByMe, &e.State,
+			&e.BannerPath,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan: "+err.Error())
 			return
@@ -187,6 +190,7 @@ type createEventRequest struct {
 	LocationVisibility string     `json:"location_visibility"`
 	TipThreshold       *int       `json:"tip_threshold,omitempty"`
 	TipDeadline        *time.Time `json:"tip_deadline,omitempty"`
+	BannerPath         *string    `json:"banner_path,omitempty"`
 }
 
 // createdEvent is returned to the Host after a successful POST /events.
@@ -210,6 +214,7 @@ type createdEvent struct {
 	LocationVisibility string     `json:"location_visibility"`
 	TipThreshold       *int       `json:"tip_threshold,omitempty"`
 	TipDeadline        *time.Time `json:"tip_deadline,omitempty"`
+	BannerPath         *string    `json:"banner_path,omitempty"`
 }
 
 func (in *createEventRequest) validate(now time.Time) error {
@@ -314,7 +319,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			host_id, title, description, category,
 			start_time, end_time, cap,
 			geom, display_geom, fuzz_radius_m, location_visibility,
-			tip_threshold, tip_deadline
+			tip_threshold, tip_deadline, banner_path
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
 			ST_SetSRID(ST_MakePoint($8, $9), 4326),
@@ -327,20 +332,20 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			ELSE NULL END,
 			$11,
 			$10,
-			$12, $13
+			$12, $13, $14
 		)
 		RETURNING
 			id, host_id, title, description, category,
 			start_time, end_time, cap,
 			ST_Y(geom)::float8, ST_X(geom)::float8,
 			fuzz_radius_m, location_visibility,
-			tip_threshold, tip_deadline
+			tip_threshold, tip_deadline, banner_path
 	`,
 		hostID, in.Title, in.Description, in.Category,
 		in.StartTime, in.EndTime, in.Cap,
 		in.Lon, in.Lat,
 		visibility, defaultFuzzM,
-		in.TipThreshold, in.TipDeadline,
+		in.TipThreshold, in.TipDeadline, in.BannerPath,
 	)
 
 	var out createdEvent
@@ -349,7 +354,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		&out.StartTime, &out.EndTime, &out.Cap,
 		&out.Lat, &out.Lon,
 		&out.FuzzRadiusM, &out.LocationVisibility,
-		&out.TipThreshold, &out.TipDeadline,
+		&out.TipThreshold, &out.TipDeadline, &out.BannerPath,
 	); err != nil {
 		writeError(w, http.StatusInternalServerError, "insert event: "+err.Error())
 		return
