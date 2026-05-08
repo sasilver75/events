@@ -9,7 +9,12 @@ struct RootView: View {
       ProgressView()
         .controlSize(.large)
     case .signedIn:
-      ContentView()
+      TabView {
+        ContentView()
+          .tabItem { Label("Map", systemImage: "map") }
+        FriendsView()
+          .tabItem { Label("Friends", systemImage: "person.2") }
+      }
     case .signedOut, .awaitingCode:
       SignInView()
     }

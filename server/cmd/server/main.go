@@ -22,6 +22,7 @@ import (
 	"github.com/sasilver75/events/server/internal/checkins"
 	"github.com/sasilver75/events/server/internal/commits"
 	"github.com/sasilver75/events/server/internal/events"
+	"github.com/sasilver75/events/server/internal/friends"
 	"github.com/sasilver75/events/server/internal/lifecycle"
 )
 
@@ -62,6 +63,7 @@ func main() {
 	eventsHandler := events.New(pool)
 	commitsHandler := commits.New(pool)
 	checkinsHandler := checkins.New(pool)
+	friendsHandler := friends.New(pool)
 
 	// --- background lifecycle loop ---
 	go lifecycle.New(pool).Run(appCtx)
@@ -85,6 +87,15 @@ func main() {
 		r.Post("/events/{id}/commit", commitsHandler.Commit)
 		r.Delete("/events/{id}/commit", commitsHandler.Withdraw)
 		r.Post("/events/{id}/checkin", checkinsHandler.CheckIn)
+
+		r.Get("/friends", friendsHandler.ListFriends)
+		r.Delete("/friends/{friend_id}", friendsHandler.Unfriend)
+		r.Get("/friends/requests", friendsHandler.ListRequests)
+		r.Post("/friends/requests", friendsHandler.SendRequest)
+		r.Post("/friends/requests/{requester_id}/accept", friendsHandler.AcceptRequest)
+		r.Delete("/friends/requests/{requester_id}", friendsHandler.RejectRequest)
+		r.Delete("/friends/requests/sent/{recipient_id}", friendsHandler.WithdrawRequest)
+		r.Get("/friends/candidates", friendsHandler.SearchCandidates)
 	})
 
 	// --- HTTP server lifecycle (start + graceful shutdown on SIGINT/SIGTERM) ---
