@@ -36,6 +36,8 @@
       "Bash(gofmt -l *)",
       "Bash(golangci-lint *)",
       "Bash(git fetch*)",
+      "Bash(git -C * log *)",
+      "Bash(git -C * status *)",
       "Bash(make migrate-up*)",
       "Bash(make migrate-down*)",
       "Bash(make seed*)",
