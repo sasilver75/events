@@ -66,8 +66,12 @@ func TestCheckInEndpoint(t *testing.T) {
 	}
 	defer pool.Close()
 
-	_ = ensureTestUser(t, supabaseURL, serviceKey, testEmailA, testPasswordA)
-	_ = ensureTestUser(t, supabaseURL, serviceKey, testEmailB, testPasswordB)
+	userAID := ensureTestUser(t, supabaseURL, serviceKey, testEmailA, testPasswordA)
+	userBID := ensureTestUser(t, supabaseURL, serviceKey, testEmailB, testPasswordB)
+	// ADR 0025 dropped the auth-mirror trigger; explicitly create the
+	// public.users rows the FK on commits and check-ins requires.
+	ensureProfile(ctx, t, pool, userAID, "checkinstesta", "CheckinsTestA", "CheckinsTestA")
+	ensureProfile(ctx, t, pool, userBID, "checkinstestb", "CheckinsTestB", "CheckinsTestB")
 	tokenA := signInWithPassword(t, supabaseURL, anonKey, testEmailA, testPasswordA)
 	tokenB := signInWithPassword(t, supabaseURL, anonKey, testEmailB, testPasswordB)
 	userA := userIDFromToken(t, supabaseURL, serviceKey, testEmailA)
@@ -355,6 +359,25 @@ func insertCommit(ctx context.Context, t *testing.T, pool *pgxpool.Pool, eventID
 		eventID, userID,
 	); err != nil {
 		t.Fatalf("insert commit: %v", err)
+	}
+}
+
+// ensureProfile lands a complete public.users row for an auth.users-only
+// user the test just provisioned. Necessary now that migration 0016 dropped
+// the auth-mirror trigger and POST /users/me/profile is the sole insert
+// path (#88, ADR 0025) — these tests don't go through that handler so they
+// upsert directly. Same shape as the helper in friends_test.go.
+func ensureProfile(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID, handle, handleDisplay, displayName string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO public.users (id, handle, handle_display, display_name, dob, tos_accepted_at, tos_version)
+		VALUES ($1, $2, $3, $4, '1990-01-01', now(), 'v1')
+		ON CONFLICT (id) DO UPDATE SET
+			handle         = EXCLUDED.handle,
+			handle_display = EXCLUDED.handle_display,
+			display_name   = EXCLUDED.display_name
+	`, userID, handle, handleDisplay, displayName); err != nil {
+		t.Fatalf("ensure profile: %v", err)
 	}
 }
 

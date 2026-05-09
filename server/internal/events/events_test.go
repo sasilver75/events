@@ -59,6 +59,9 @@ func TestNearbyEventsEndpoint(t *testing.T) {
 	requireSeedEvents(ctx, t, pool)
 
 	viewerID := ensureTestUser(t, supabaseURL, serviceKey)
+	// ADR 0025 dropped the auth-mirror trigger; explicitly create the
+	// public.users row the FK on commits requires for this viewer.
+	ensureProfile(ctx, t, pool, viewerID, "eventstestv", "EventsTestV", "EventsTestV")
 	if _, err := pool.Exec(ctx, `DELETE FROM public.commits WHERE user_id = $1`, viewerID); err != nil {
 		t.Fatalf("clear commits: %v", err)
 	}
@@ -430,6 +433,24 @@ func insertPastSeedEvent(ctx context.Context, t *testing.T, pool *pgxpool.Pool) 
 		t.Fatalf("insert past event: %v", err)
 	}
 	return id
+}
+
+// ensureProfile lands a complete public.users row for an auth.users-only
+// user. ADR 0025 dropped the auth-mirror trigger; tests that don't go
+// through POST /users/me/profile upsert directly. Same shape as the
+// helpers in friends_test.go, checkins_test.go, and commits_test.go.
+func ensureProfile(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID, handle, handleDisplay, displayName string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO public.users (id, handle, handle_display, display_name, dob, tos_accepted_at, tos_version)
+		VALUES ($1, $2, $3, $4, '1990-01-01', now(), 'v1')
+		ON CONFLICT (id) DO UPDATE SET
+			handle         = EXCLUDED.handle,
+			handle_display = EXCLUDED.handle_display,
+			display_name   = EXCLUDED.display_name
+	`, userID, handle, handleDisplay, displayName); err != nil {
+		t.Fatalf("ensure profile: %v", err)
+	}
 }
 
 // ensureTestUser idempotently creates the events-test user via Admin API and

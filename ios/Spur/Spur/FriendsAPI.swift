@@ -65,12 +65,16 @@ enum FriendsAPI {
 
   struct Candidate: Decodable, Identifiable {
     let userID: String
+    let handle: String
+    let handleDisplay: String
     let displayName: String
 
     var id: String { userID }
 
     enum CodingKeys: String, CodingKey {
       case userID = "user_id"
+      case handle
+      case handleDisplay = "handle_display"
       case displayName = "display_name"
     }
   }

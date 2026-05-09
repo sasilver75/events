@@ -55,6 +55,10 @@ func TestCommitsEndpoints(t *testing.T) {
 
 	userA := ensureTestUser(t, supabaseURL, serviceKey, testEmailA, testPasswordA)
 	userB := ensureTestUser(t, supabaseURL, serviceKey, testEmailB, testPasswordB)
+	// ADR 0025 dropped the auth-mirror trigger; explicitly create the
+	// public.users rows the FK on commits requires.
+	ensureProfile(ctx, t, pool, userA, "commitstesta", "CommitsTestA", "CommitsTestA")
+	ensureProfile(ctx, t, pool, userB, "commitstestb", "CommitsTestB", "CommitsTestB")
 	tokenA := signInWithPassword(t, supabaseURL, anonKey, testEmailA, testPasswordA)
 	tokenB := signInWithPassword(t, supabaseURL, anonKey, testEmailB, testPasswordB)
 
@@ -433,6 +437,24 @@ func deleteEvent(ctx context.Context, t *testing.T, pool *pgxpool.Pool, id strin
 	t.Helper()
 	if _, err := pool.Exec(ctx, `DELETE FROM public.events WHERE id = $1`, id); err != nil {
 		t.Errorf("delete event: %v", err)
+	}
+}
+
+// ensureProfile lands a complete public.users row for an auth.users-only
+// user. ADR 0025 dropped the auth-mirror trigger; tests that don't go
+// through POST /users/me/profile upsert directly. Same shape as the
+// helpers in friends_test.go and checkins_test.go.
+func ensureProfile(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID, handle, handleDisplay, displayName string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO public.users (id, handle, handle_display, display_name, dob, tos_accepted_at, tos_version)
+		VALUES ($1, $2, $3, $4, '1990-01-01', now(), 'v1')
+		ON CONFLICT (id) DO UPDATE SET
+			handle         = EXCLUDED.handle,
+			handle_display = EXCLUDED.handle_display,
+			display_name   = EXCLUDED.display_name
+	`, userID, handle, handleDisplay, displayName); err != nil {
+		t.Fatalf("ensure profile: %v", err)
 	}
 }
 

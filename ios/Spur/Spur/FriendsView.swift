@@ -29,7 +29,7 @@ struct FriendsView: View {
       .navigationTitle("Friends")
       .searchable(
         text: $searchText, placement: .navigationBarDrawer(displayMode: .always),
-        prompt: "Find by display name"
+        prompt: "Find by handle (e.g. samsilver)"
       )
       .onChange(of: searchText) { _, newValue in
         scheduleSearch(query: newValue)
@@ -86,7 +86,7 @@ struct FriendsView: View {
       ContentUnavailableView(
         "No friends yet",
         systemImage: "person.2",
-        description: Text("Search by display name to send a request."))
+        description: Text("Search by handle to send a request."))
     } else {
       List {
         if !incoming.isEmpty || !outgoing.isEmpty {
@@ -133,8 +133,13 @@ struct FriendsView: View {
       List(searchResults) { candidate in
         HStack {
           AvatarBubble(name: candidate.displayName)
-          Text(candidate.displayName)
-            .font(.body)
+          VStack(alignment: .leading, spacing: 2) {
+            Text(candidate.displayName)
+              .font(.body)
+            Text("@\(candidate.handleDisplay)")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
           Spacer()
           Button {
             Task { await performSend(candidate) }

@@ -27,6 +27,14 @@ const (
 	testEmailC    = "friends-test-c@spur.local"
 	testPasswordC = "friends-test-c-not-secret"
 
+	handleA = "friendtestalice"
+	handleB = "friendtestbob"
+	handleC = "friendtestcarol"
+
+	handleDisplayA = "FriendTestAlice"
+	handleDisplayB = "FriendTestBob"
+	handleDisplayC = "FriendTestCarol"
+
 	displayNameA = "FriendTestAlice"
 	displayNameB = "FriendTestBob"
 	displayNameC = "FriendTestCarol"
@@ -56,8 +64,10 @@ type requestsListResponse struct {
 }
 
 type candidateRow struct {
-	UserID      string `json:"user_id"`
-	DisplayName string `json:"display_name"`
+	UserID        string `json:"user_id"`
+	Handle        string `json:"handle"`
+	HandleDisplay string `json:"handle_display"`
+	DisplayName   string `json:"display_name"`
 }
 
 func TestFriendsEndpoints(t *testing.T) {
@@ -87,9 +97,9 @@ func TestFriendsEndpoints(t *testing.T) {
 	userB := userIDFromToken(t, supabaseURL, serviceKey, testEmailB)
 	userC := userIDFromToken(t, supabaseURL, serviceKey, testEmailC)
 
-	setDisplayName(ctx, t, pool, userA, displayNameA)
-	setDisplayName(ctx, t, pool, userB, displayNameB)
-	setDisplayName(ctx, t, pool, userC, displayNameC)
+	upsertProfile(ctx, t, pool, userA, handleA, handleDisplayA, displayNameA)
+	upsertProfile(ctx, t, pool, userB, handleB, handleDisplayB, displayNameB)
+	upsertProfile(ctx, t, pool, userC, handleC, handleDisplayC, displayNameC)
 
 	verifier, err := auth.NewVerifier(ctx, supabaseURL)
 	if err != nil {
@@ -153,7 +163,7 @@ func TestFriendsEndpoints(t *testing.T) {
 			{http.MethodGet, "/friends"},
 			{http.MethodGet, "/friends/requests"},
 			{http.MethodPost, "/friends/requests"},
-			{http.MethodGet, "/friends/candidates?q=" + displayNameB},
+			{http.MethodGet, "/friends/candidates?q=" + handleB},
 			{http.MethodPost, "/friends/requests/" + userA + "/accept"},
 			{http.MethodDelete, "/friends/requests/" + userA},
 			{http.MethodDelete, "/friends/requests/sent/" + userB},
@@ -419,9 +429,9 @@ func TestFriendsEndpoints(t *testing.T) {
 		}
 	})
 
-	t.Run("candidates: exact match returns user; excludes caller", func(t *testing.T) {
+	t.Run("candidates: exact handle match returns user; excludes caller", func(t *testing.T) {
 		resetGraph()
-		rec, body := do(t, http.MethodGet, "/friends/candidates?q="+displayNameB, tokenA, nil)
+		rec, body := do(t, http.MethodGet, "/friends/candidates?q="+handleB, tokenA, nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rec.Code, body)
 		}
@@ -429,12 +439,12 @@ func TestFriendsEndpoints(t *testing.T) {
 		if err := json.Unmarshal(body, &got); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		if len(got) != 1 || got[0].UserID != userB || got[0].DisplayName != displayNameB {
+		if len(got) != 1 || got[0].UserID != userB || got[0].Handle != handleB || got[0].HandleDisplay != handleDisplayB || got[0].DisplayName != displayNameB {
 			t.Errorf("expected one B candidate, got %+v", got)
 		}
 
-		// Caller searching for their own display name → empty.
-		rec, body = do(t, http.MethodGet, "/friends/candidates?q="+displayNameA, tokenA, nil)
+		// Caller searching for their own handle → empty.
+		rec, body = do(t, http.MethodGet, "/friends/candidates?q="+handleA, tokenA, nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rec.Code, body)
 		}
@@ -442,6 +452,22 @@ func TestFriendsEndpoints(t *testing.T) {
 		_ = json.Unmarshal(body, &self)
 		if len(self) != 0 {
 			t.Errorf("self should not appear in own candidates: %+v", self)
+		}
+	})
+
+	t.Run("candidates: search lowercases the query", func(t *testing.T) {
+		resetGraph()
+		// User typed the handle in mixed case; server lowercases server-side.
+		rec, body := do(t, http.MethodGet, "/friends/candidates?q="+handleDisplayB, tokenA, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, body)
+		}
+		var got []candidateRow
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(got) != 1 || got[0].UserID != userB {
+			t.Errorf("expected mixed-case query to match lowercase handle, got %+v", got)
 		}
 	})
 
@@ -459,10 +485,22 @@ func TestFriendsEndpoints(t *testing.T) {
 
 // --- DB helpers ---
 
-func setDisplayName(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID, name string) {
+// upsertProfile lands a complete public.users row for an auth.users-only user
+// the test suite just provisioned. Necessary now that migration 0016 dropped
+// the auth-mirror trigger and POST /users/me/profile is the sole insert path
+// (ADR 0025) — friend-graph tests don't go through the HTTP handler so they
+// upsert directly.
+func upsertProfile(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID, handle, handleDisplay, displayName string) {
 	t.Helper()
-	if _, err := pool.Exec(ctx, `UPDATE public.users SET display_name = $1 WHERE id = $2`, name, userID); err != nil {
-		t.Fatalf("set display_name: %v", err)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO public.users (id, handle, handle_display, display_name, dob, tos_accepted_at, tos_version)
+		VALUES ($1, $2, $3, $4, '1990-01-01', now(), 'v1')
+		ON CONFLICT (id) DO UPDATE SET
+			handle         = EXCLUDED.handle,
+			handle_display = EXCLUDED.handle_display,
+			display_name   = EXCLUDED.display_name
+	`, userID, handle, handleDisplay, displayName); err != nil {
+		t.Fatalf("upsert profile: %v", err)
 	}
 }
 

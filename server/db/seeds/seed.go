@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"os"
@@ -15,9 +18,18 @@ import (
 
 const SeedCount = 3
 
+// Seed-user profile fields. handle is the source-of-truth lowercased
+// identifier; handle_display is the cased rendering. display_name is the
+// free-text label. dob is a fixed long-ago date so the 18+ CHECK passes
+// regardless of the wall clock at run time.
 const (
-	spurSeedEmail   = "spur-seed@spur.local"
-	spurSeedDisplay = "Spur Seed"
+	spurSeedEmail         = "spur-seed@spur.local"
+	spurSeedHandle        = "spurseed"
+	spurSeedHandleDisplay = "SpurSeed"
+	spurSeedDisplay       = "Spur Seed"
+	spurSeedDOB           = "1990-01-01"
+	spurSeedTosVersion    = "v1"
+	spurSeedAvatarKey     = "spur-seed-v1.jpg"
 )
 
 func Run(ctx context.Context) error {
@@ -39,7 +51,12 @@ func Run(ctx context.Context) error {
 	}
 	defer func() { _ = conn.Close(ctx) }()
 
-	if err := upsertPublicSeedUser(ctx, conn, seedUserID); err != nil {
+	avatarPath := seedUserID + "/" + spurSeedAvatarKey
+	if err := uploadSeedAvatar(ctx, supaURL, supaKey, avatarPath); err != nil {
+		return fmt.Errorf("upload seed avatar: %w", err)
+	}
+
+	if err := upsertPublicSeedUser(ctx, conn, seedUserID, avatarPath); err != nil {
 		return fmt.Errorf("upsert public.users seed row: %w", err)
 	}
 
@@ -51,13 +68,81 @@ func Run(ctx context.Context) error {
 	return nil
 }
 
-func upsertPublicSeedUser(ctx context.Context, conn *pgx.Conn, id string) error {
+func upsertPublicSeedUser(ctx context.Context, conn *pgx.Conn, id, avatarPath string) error {
 	_, err := conn.Exec(ctx, `
-		INSERT INTO public.users (id, display_name)
-		VALUES ($1, $2)
-		ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name
-	`, id, spurSeedDisplay)
+		INSERT INTO public.users
+			(id, handle, handle_display, display_name, dob, tos_accepted_at, tos_version, avatar_path)
+		VALUES
+			($1, $2, $3, $4, $5::date, now(), $6, $7)
+		ON CONFLICT (id) DO UPDATE SET
+			handle          = EXCLUDED.handle,
+			handle_display  = EXCLUDED.handle_display,
+			display_name    = EXCLUDED.display_name,
+			dob             = EXCLUDED.dob,
+			tos_accepted_at = EXCLUDED.tos_accepted_at,
+			tos_version     = EXCLUDED.tos_version,
+			avatar_path     = EXCLUDED.avatar_path
+	`,
+		id, spurSeedHandle, spurSeedHandleDisplay, spurSeedDisplay,
+		spurSeedDOB, spurSeedTosVersion, avatarPath,
+	)
 	return err
+}
+
+// uploadSeedAvatar generates a tiny solid-color JPEG and uploads it to the
+// avatars bucket at `{seedUserID}/{spurSeedAvatarKey}`. Idempotent — uses
+// the storage upsert flag so re-running the seed doesn't 409 on the
+// already-present object.
+//
+// The avatar is generated in-process rather than committed as a binary
+// fixture so the seed runner has zero filesystem dependencies and the
+// resulting image is reproducible byte-for-byte across machines.
+func uploadSeedAvatar(ctx context.Context, supaURL, serviceKey, path string) error {
+	jpegBytes, err := generateSeedAvatarJPEG()
+	if err != nil {
+		return fmt.Errorf("generate avatar bytes: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/storage/v1/object/avatars/%s", supaURL, path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jpegBytes))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "image/jpeg")
+	req.Header.Set("Authorization", "Bearer "+serviceKey)
+	req.Header.Set("apikey", serviceKey)
+	// upsert: if the object already exists, replace it so re-runs don't 409.
+	req.Header.Set("x-upsert", "true")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("storage upload: HTTP %d: %s", resp.StatusCode, body)
+	}
+	return nil
+}
+
+// generateSeedAvatarJPEG produces a deterministic 256x256 solid-color
+// placeholder. Spur-orange (#F97316). Output stays well under the 2 MiB
+// bucket cap (~2 KiB at quality 80).
+func generateSeedAvatarJPEG() ([]byte, error) {
+	const size = 256
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	fill := color.RGBA{R: 0xF9, G: 0x73, B: 0x16, A: 0xFF}
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			img.SetRGBA(x, y, fill)
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 80}); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func upsertCuratedEvent(ctx context.Context, conn *pgx.Conn, hostID string, e CuratedEvent) error {

@@ -15,6 +15,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -57,8 +58,10 @@ type requestsListResponse struct {
 }
 
 type candidateRow struct {
-	UserID      string `json:"user_id"`
-	DisplayName string `json:"display_name"`
+	UserID        string `json:"user_id"`
+	Handle        string `json:"handle"`
+	HandleDisplay string `json:"handle_display"`
+	DisplayName   string `json:"display_name"`
 }
 
 // SendRequest handles POST /friends/requests.
@@ -401,27 +404,30 @@ func (h *Handler) ListRequests(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SearchCandidates handles GET /friends/candidates?q=<display_name>.
-// Exact match on display_name. Excludes the caller themselves so the
-// "send request" affordance doesn't appear on the user's own row.
-// Existing-friend / pending-request filtering is intentionally left to
-// the SendRequest 409 path so the result list is one query, not three.
+// SearchCandidates handles GET /friends/candidates?q=<handle>.
+// Exact match on the lowercased handle (#88 switched from display_name to
+// handle since display_name is non-unique under ADR 0025). The query is
+// lowercased server-side so the iOS field can be permissive about casing.
+// Excludes the caller themselves so the "send request" affordance doesn't
+// appear on the user's own row. Existing-friend / pending-request
+// filtering is intentionally left to the SendRequest 409 path so the
+// result list is one query, not three.
 func (h *Handler) SearchCandidates(w http.ResponseWriter, r *http.Request) {
 	caller, ok := auth.UserIDFrom(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "no user in context")
 		return
 	}
-	q := r.URL.Query().Get("q")
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
 		writeError(w, http.StatusBadRequest, "q required")
 		return
 	}
 
 	rows, err := h.pool.Query(r.Context(), `
-		SELECT id, COALESCE(display_name, '')
+		SELECT id, handle, handle_display, display_name
 		FROM public.users
-		WHERE display_name = $1 AND id <> $2
+		WHERE handle = lower($1) AND id <> $2
 		LIMIT 20
 	`, q, caller)
 	if err != nil {
@@ -433,7 +439,7 @@ func (h *Handler) SearchCandidates(w http.ResponseWriter, r *http.Request) {
 	out := make([]candidateRow, 0)
 	for rows.Next() {
 		var c candidateRow
-		if err := rows.Scan(&c.UserID, &c.DisplayName); err != nil {
+		if err := rows.Scan(&c.UserID, &c.Handle, &c.HandleDisplay, &c.DisplayName); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan: "+err.Error())
 			return
 		}

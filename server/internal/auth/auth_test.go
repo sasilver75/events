@@ -18,8 +18,10 @@ import (
 
 // Integration test: uses the local Supabase stack to mint a real JWT via the
 // seeded test OTP path, then exercises the full middleware chain against /me.
-// Also asserts the auth.users → public.users mirror trigger (migration 0006,
-// ADR 0022) created the domain row inside Supabase Auth's transaction.
+// Asserts that the auth.users → public.users mirror trigger from migration
+// 0006 is gone (#88, ADR 0025): a freshly-verified phone OTP creates an
+// auth.users row but no public.users row — POST /users/me/profile is the
+// sole insert path now.
 //
 // Requires:
 //   - `supabase start` running locally with [auth.sms.test_otp] enabling
@@ -82,9 +84,10 @@ func TestAuthMiddlewareEndToEnd(t *testing.T) {
 	const dbPhone = "14152127777"
 	const testCode = "123456"
 
-	// Force the trigger path: delete any prior auth.users row for the test
-	// phone so the verify below creates a fresh user. The cascade clears
-	// public.users with it.
+	// Delete any prior auth.users row for the test phone so the verify below
+	// creates a fresh user. ADR 0025 dropped the auth-mirror trigger from
+	// 0006; nothing else writes to public.users automatically, so this also
+	// guarantees public.users has no row for the user.
 	if _, err := pool.Exec(ctx, `DELETE FROM auth.users WHERE phone = $1`, dbPhone); err != nil {
 		t.Fatalf("cleanup auth.users: %v", err)
 	}
@@ -92,7 +95,7 @@ func TestAuthMiddlewareEndToEnd(t *testing.T) {
 	signInWithTestOTP(t, supabaseURL, anonKey, wirePhone)
 	token, userID := verifyTestOTP(t, supabaseURL, anonKey, wirePhone, testCode)
 
-	t.Run("trigger mirrored auth.users to public.users at signup", func(t *testing.T) {
+	t.Run("no public.users row mirrored at signup (trigger dropped, ADR 0025)", func(t *testing.T) {
 		var exists bool
 		err := pool.QueryRow(ctx,
 			`SELECT EXISTS (SELECT 1 FROM public.users WHERE id = $1)`,
@@ -101,12 +104,15 @@ func TestAuthMiddlewareEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("query: %v", err)
 		}
-		if !exists {
-			t.Errorf("public.users row missing for fresh auth.users %s — trigger did not fire", userID)
+		if exists {
+			t.Errorf("public.users row exists for fresh auth.users %s — trigger should be gone", userID)
 		}
 	})
 
-	t.Run("valid token returns user_id from /me", func(t *testing.T) {
+	t.Run("valid token returns user_id from /me (auth.Middleware in isolation)", func(t *testing.T) {
+		// The verifier.Middleware on its own only checks the JWT — there's
+		// no public.users-existence gate at this layer. main.go composes
+		// users.RequireProfile on top of this for rule-bearing endpoints.
 		req := httptest.NewRequest(http.MethodGet, "/me", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		rec := httptest.NewRecorder()

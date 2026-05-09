@@ -36,6 +36,8 @@ func TestCancelEndpoint(t *testing.T) {
 	defer pool.Close()
 
 	hostID := ensureTestUser(t, supabaseURL, serviceKey)
+	// ADR 0025 dropped the auth-mirror trigger; ensure public.users row.
+	ensureProfile(ctx, t, pool, hostID, "eventstestv", "EventsTestV", "EventsTestV")
 	token := signInWithPassword(t, supabaseURL, anonKey)
 
 	verifier, err := auth.NewVerifier(ctx, supabaseURL)

@@ -2,9 +2,11 @@
 // user's UUID to downstream handlers.
 //
 // Identity bridging — making sure every auth.users row has a matching
-// public.users row — happens in Postgres via the trigger introduced in
-// migration 0006_mirror_auth_users (see ADR 0022). Handlers behind
-// Middleware can assume the public.users row exists.
+// public.users row — used to happen in Postgres via the trigger introduced
+// in migration 0006 (ADR 0022). #88 dropped that trigger when public.users
+// gained NOT NULL profile fields the user has to type in (ADR 0025);
+// POST /users/me/profile is now the sole insert path. The users package's
+// RequireProfile middleware gates rule-bearing endpoints on row existence.
 package auth
 
 import (

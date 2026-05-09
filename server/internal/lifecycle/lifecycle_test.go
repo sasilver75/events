@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,8 +186,10 @@ func TestResolveDoneEventOutcomes(t *testing.T) {
 		return id
 	}
 
-	// insertUser creates an auth.users row; the mirror trigger from
-	// migration 0006 propagates a matching public.users row.
+	// insertUser creates an auth.users row plus a matching public.users row.
+	// ADR 0025 dropped the mirror trigger from migration 0006, so the
+	// public.users insert is explicit. Each call uses a unique handle so
+	// concurrent test runs don't collide on the unique constraint.
 	insertUser := func(t *testing.T) string {
 		t.Helper()
 		var id string
@@ -195,7 +198,16 @@ func TestResolveDoneEventOutcomes(t *testing.T) {
 			VALUES (gen_random_uuid(), gen_random_uuid()::text || '@test.local')
 			RETURNING id
 		`).Scan(&id); err != nil {
-			t.Fatalf("insert user: %v", err)
+			t.Fatalf("insert auth.users: %v", err)
+		}
+		// Handle prefix derived from the UUID keeps it unique and within the
+		// 3..20 char limit. Lowercase hex matches the handle CHECK regex.
+		short := strings.ReplaceAll(id, "-", "")[:16]
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO public.users (id, handle, handle_display, display_name, dob, tos_accepted_at, tos_version)
+			VALUES ($1, 'lc' || $2, 'lc' || $2, 'Lifecycle ' || $2, '1990-01-01', now(), 'v1')
+		`, id, short); err != nil {
+			t.Fatalf("insert public.users: %v", err)
 		}
 		t.Cleanup(func() {
 			_, _ = pool.Exec(ctx, `DELETE FROM auth.users WHERE id = $1`, id)
