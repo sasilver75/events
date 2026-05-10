@@ -138,6 +138,7 @@ else
   DATABASE_URL="$DB_URL" \
     SUPABASE_URL="$SPUR_SUPABASE_API_URL" \
     PORT="$SPUR_SERVER_PORT" \
+    TOS_PATH="$ROOT/docs/legal/tos-v1.md" \
     nohup go run ./cmd/server >"$LOGFILE" 2>&1 &
   echo $! > "$PIDFILE"
   cd - >/dev/null

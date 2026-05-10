@@ -29,7 +29,7 @@ struct FriendsView: View {
       .navigationTitle("Friends")
       .searchable(
         text: $searchText, placement: .navigationBarDrawer(displayMode: .always),
-        prompt: "Find by display name"
+        prompt: "Find by handle (e.g. samsilver)"
       )
       .onChange(of: searchText) { _, newValue in
         scheduleSearch(query: newValue)

@@ -401,8 +401,8 @@ func (h *Handler) ListRequests(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// SearchCandidates handles GET /friends/candidates?q=<display_name>.
-// Exact match on display_name. Excludes the caller themselves so the
+// SearchCandidates handles GET /friends/candidates?q=<handle>.
+// Exact match on handle (lowercased). Excludes the caller themselves so the
 // "send request" affordance doesn't appear on the user's own row.
 // Existing-friend / pending-request filtering is intentionally left to
 // the SendRequest 409 path so the result list is one query, not three.
@@ -419,9 +419,9 @@ func (h *Handler) SearchCandidates(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.pool.Query(r.Context(), `
-		SELECT id, COALESCE(display_name, '')
+		SELECT id, display_name
 		FROM public.users
-		WHERE display_name = $1 AND id <> $2
+		WHERE handle = lower($1) AND id <> $2
 		LIMIT 20
 	`, q, caller)
 	if err != nil {

@@ -17,6 +17,7 @@ import (
 
 	"github.com/sasilver75/events/server/internal/auth"
 	"github.com/sasilver75/events/server/internal/events"
+	"github.com/sasilver75/events/server/internal/testsupport"
 )
 
 const (
@@ -60,6 +61,7 @@ func TestNearbyEventsEndpoint(t *testing.T) {
 	requireSeedEvents(ctx, t, pool)
 
 	viewerID := ensureTestUser(t, supabaseURL, serviceKey)
+	testsupport.EnsureProfile(t, pool, viewerID, "EventsTestViewer")
 	if _, err := pool.Exec(ctx, `DELETE FROM public.commits WHERE user_id = $1`, viewerID); err != nil {
 		t.Fatalf("clear commits: %v", err)
 	}
