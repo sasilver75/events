@@ -82,9 +82,8 @@ func TestAuthMiddlewareEndToEnd(t *testing.T) {
 	const dbPhone = "14152127777"
 	const testCode = "123456"
 
-	// Force the trigger path: delete any prior auth.users row for the test
-	// phone so the verify below creates a fresh user. The cascade clears
-	// public.users with it.
+	// Delete any prior auth.users row for the test phone so the verify
+	// below creates a fresh user. The cascade clears public.users with it.
 	if _, err := pool.Exec(ctx, `DELETE FROM auth.users WHERE phone = $1`, dbPhone); err != nil {
 		t.Fatalf("cleanup auth.users: %v", err)
 	}
@@ -92,7 +91,10 @@ func TestAuthMiddlewareEndToEnd(t *testing.T) {
 	signInWithTestOTP(t, supabaseURL, anonKey, wirePhone)
 	token, userID := verifyTestOTP(t, supabaseURL, anonKey, wirePhone, testCode)
 
-	t.Run("trigger mirrored auth.users to public.users at signup", func(t *testing.T) {
+	t.Run("public.users row is NOT auto-created on OTP verify (ADR 0025)", func(t *testing.T) {
+		// The auth-mirror trigger from migration 0006 was dropped in 0017.
+		// Profile completion now drives public.users creation via
+		// POST /users/me/profile, not the OTP verify itself.
 		var exists bool
 		err := pool.QueryRow(ctx,
 			`SELECT EXISTS (SELECT 1 FROM public.users WHERE id = $1)`,
@@ -101,8 +103,8 @@ func TestAuthMiddlewareEndToEnd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("query: %v", err)
 		}
-		if !exists {
-			t.Errorf("public.users row missing for fresh auth.users %s — trigger did not fire", userID)
+		if exists {
+			t.Errorf("public.users row unexpectedly present for fresh auth.users %s — trigger should be gone", userID)
 		}
 	})
 

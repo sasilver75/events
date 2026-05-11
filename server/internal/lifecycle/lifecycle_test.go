@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/sasilver75/events/server/internal/lifecycle"
+	"github.com/sasilver75/events/server/internal/testsupport"
 )
 
 // TestCancelExpiredBetaEvents drives the auto-cancel work directly (no
@@ -185,8 +186,9 @@ func TestResolveDoneEventOutcomes(t *testing.T) {
 		return id
 	}
 
-	// insertUser creates an auth.users row; the mirror trigger from
-	// migration 0006 propagates a matching public.users row.
+	// insertUser creates an auth.users row plus a matching public.users
+	// profile row (the mirror trigger that used to do this was dropped in
+	// migration 0017 — see ADR 0025).
 	insertUser := func(t *testing.T) string {
 		t.Helper()
 		var id string
@@ -197,6 +199,7 @@ func TestResolveDoneEventOutcomes(t *testing.T) {
 		`).Scan(&id); err != nil {
 			t.Fatalf("insert user: %v", err)
 		}
+		testsupport.EnsureProfile(t, pool, id, "LifecycleTestUser")
 		t.Cleanup(func() {
 			_, _ = pool.Exec(ctx, `DELETE FROM auth.users WHERE id = $1`, id)
 		})
@@ -405,6 +408,7 @@ func TestDoneFanOutToReputation(t *testing.T) {
 	`).Scan(&userID); err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
+	testsupport.EnsureProfile(t, pool, userID, "LifecycleFanOutUser")
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM public.reputation WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM auth.users WHERE id = $1`, userID)
@@ -460,6 +464,7 @@ func TestRefreshStaleReputations(t *testing.T) {
 		`).Scan(&id); err != nil {
 			t.Fatalf("insert user: %v", err)
 		}
+		testsupport.EnsureProfile(t, pool, id, "LifecycleStaleRefresh")
 		t.Cleanup(func() {
 			_, _ = pool.Exec(ctx, `DELETE FROM public.reputation WHERE user_id = $1`, id)
 			_, _ = pool.Exec(ctx, `DELETE FROM auth.users WHERE id = $1`, id)

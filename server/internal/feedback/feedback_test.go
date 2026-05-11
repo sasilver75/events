@@ -17,6 +17,7 @@ import (
 
 	"github.com/sasilver75/events/server/internal/auth"
 	"github.com/sasilver75/events/server/internal/feedback"
+	"github.com/sasilver75/events/server/internal/testsupport"
 )
 
 const (
@@ -52,6 +53,9 @@ func TestFeedbackEndpoint(t *testing.T) {
 	userA := userIDFromToken(t, supabaseURL, serviceKey, testEmailA)
 	userB := userIDFromToken(t, supabaseURL, serviceKey, testEmailB)
 	userC := userIDFromToken(t, supabaseURL, serviceKey, testEmailC)
+	testsupport.EnsureProfile(t, pool, userA, "FeedbackTestA")
+	testsupport.EnsureProfile(t, pool, userB, "FeedbackTestB")
+	testsupport.EnsureProfile(t, pool, userC, "FeedbackTestC")
 
 	verifier, err := auth.NewVerifier(ctx, supabaseURL)
 	if err != nil {

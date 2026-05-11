@@ -17,6 +17,7 @@ import (
 
 	"github.com/sasilver75/events/server/internal/auth"
 	"github.com/sasilver75/events/server/internal/checkins"
+	"github.com/sasilver75/events/server/internal/testsupport"
 )
 
 const (
@@ -72,6 +73,8 @@ func TestCheckInEndpoint(t *testing.T) {
 	tokenB := signInWithPassword(t, supabaseURL, anonKey, testEmailB, testPasswordB)
 	userA := userIDFromToken(t, supabaseURL, serviceKey, testEmailA)
 	userB := userIDFromToken(t, supabaseURL, serviceKey, testEmailB)
+	testsupport.EnsureProfile(t, pool, userA, "CheckinsTestA")
+	testsupport.EnsureProfile(t, pool, userB, "CheckinsTestB")
 
 	verifier, err := auth.NewVerifier(ctx, supabaseURL)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 	"github.com/sasilver75/events/server/internal/auth"
 	"github.com/sasilver75/events/server/internal/friends"
+	"github.com/sasilver75/events/server/internal/testsupport"
 )
 
 const (
@@ -30,6 +32,13 @@ const (
 	displayNameA = "FriendTestAlice"
 	displayNameB = "FriendTestBob"
 	displayNameC = "FriendTestCarol"
+
+	// Handles used by the SearchCandidates test. Must satisfy the format
+	// CHECK ([a-z0-9_]{3,20}); chosen short and stable so the test can
+	// query by them directly.
+	handleA = "friendtestalice"
+	handleB = "friendtestbob"
+	handleC = "friendtestcarol"
 )
 
 type sendBody struct {
@@ -87,9 +96,9 @@ func TestFriendsEndpoints(t *testing.T) {
 	userB := userIDFromToken(t, supabaseURL, serviceKey, testEmailB)
 	userC := userIDFromToken(t, supabaseURL, serviceKey, testEmailC)
 
-	setDisplayName(ctx, t, pool, userA, displayNameA)
-	setDisplayName(ctx, t, pool, userB, displayNameB)
-	setDisplayName(ctx, t, pool, userC, displayNameC)
+	testsupport.EnsureProfileWithHandle(t, pool, userA, displayNameA, handleA)
+	testsupport.EnsureProfileWithHandle(t, pool, userB, displayNameB, handleB)
+	testsupport.EnsureProfileWithHandle(t, pool, userC, displayNameC, handleC)
 
 	verifier, err := auth.NewVerifier(ctx, supabaseURL)
 	if err != nil {
@@ -419,9 +428,9 @@ func TestFriendsEndpoints(t *testing.T) {
 		}
 	})
 
-	t.Run("candidates: exact match returns user; excludes caller", func(t *testing.T) {
+	t.Run("candidates: exact handle match returns user; excludes caller", func(t *testing.T) {
 		resetGraph()
-		rec, body := do(t, http.MethodGet, "/friends/candidates?q="+displayNameB, tokenA, nil)
+		rec, body := do(t, http.MethodGet, "/friends/candidates?q="+handleB, tokenA, nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rec.Code, body)
 		}
@@ -433,8 +442,19 @@ func TestFriendsEndpoints(t *testing.T) {
 			t.Errorf("expected one B candidate, got %+v", got)
 		}
 
-		// Caller searching for their own display name → empty.
-		rec, body = do(t, http.MethodGet, "/friends/candidates?q="+displayNameA, tokenA, nil)
+		// Mixed-case handle still resolves — server lowercases.
+		rec, body = do(t, http.MethodGet, "/friends/candidates?q="+strings.ToUpper(handleB), tokenA, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, body)
+		}
+		var mixed []candidateRow
+		_ = json.Unmarshal(body, &mixed)
+		if len(mixed) != 1 || mixed[0].UserID != userB {
+			t.Errorf("mixed-case handle should match, got %+v", mixed)
+		}
+
+		// Caller searching for their own handle → empty.
+		rec, body = do(t, http.MethodGet, "/friends/candidates?q="+handleA, tokenA, nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", rec.Code, body)
 		}
@@ -443,6 +463,7 @@ func TestFriendsEndpoints(t *testing.T) {
 		if len(self) != 0 {
 			t.Errorf("self should not appear in own candidates: %+v", self)
 		}
+
 	})
 
 	t.Run("candidates: q required", func(t *testing.T) {
@@ -458,13 +479,6 @@ func TestFriendsEndpoints(t *testing.T) {
 }
 
 // --- DB helpers ---
-
-func setDisplayName(ctx context.Context, t *testing.T, pool *pgxpool.Pool, userID, name string) {
-	t.Helper()
-	if _, err := pool.Exec(ctx, `UPDATE public.users SET display_name = $1 WHERE id = $2`, name, userID); err != nil {
-		t.Fatalf("set display_name: %v", err)
-	}
-}
 
 func insertRequest(ctx context.Context, t *testing.T, pool *pgxpool.Pool, requester, recipient string) {
 	t.Helper()

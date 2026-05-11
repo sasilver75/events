@@ -15,6 +15,7 @@ import (
 
 	"github.com/sasilver75/events/server/internal/auth"
 	"github.com/sasilver75/events/server/internal/events"
+	"github.com/sasilver75/events/server/internal/testsupport"
 )
 
 type createdEvent struct {
@@ -53,6 +54,7 @@ func TestCreateEventEndpoint(t *testing.T) {
 	defer pool.Close()
 
 	hostID := ensureTestUser(t, supabaseURL, serviceKey)
+	testsupport.EnsureProfile(t, pool, hostID, "EventsCreateHost")
 	token := signInWithPassword(t, supabaseURL, anonKey)
 
 	verifier, err := auth.NewVerifier(ctx, supabaseURL)

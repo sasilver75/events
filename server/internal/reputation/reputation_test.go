@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/sasilver75/events/server/internal/reputation"
+	"github.com/sasilver75/events/server/internal/testsupport"
 )
 
 // TestRecompute drives the formula end-to-end against a real Postgres.
@@ -68,6 +69,9 @@ func TestRecompute(t *testing.T) {
 		`).Scan(&id); err != nil {
 			t.Fatalf("insert user: %v", err)
 		}
+		// public.users no longer auto-mirrored from auth.users (ADR 0025);
+		// insert the profile row directly so FKs resolve.
+		testsupport.EnsureProfile(t, pool, id, "RepTestUser")
 		t.Cleanup(func() {
 			_, _ = pool.Exec(ctx, `DELETE FROM public.reputation WHERE user_id = $1`, id)
 			_, _ = pool.Exec(ctx, `DELETE FROM auth.users WHERE id = $1`, id)

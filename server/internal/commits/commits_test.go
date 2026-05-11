@@ -18,6 +18,7 @@ import (
 
 	"github.com/sasilver75/events/server/internal/auth"
 	"github.com/sasilver75/events/server/internal/commits"
+	"github.com/sasilver75/events/server/internal/testsupport"
 )
 
 const (
@@ -55,6 +56,8 @@ func TestCommitsEndpoints(t *testing.T) {
 
 	userA := ensureTestUser(t, supabaseURL, serviceKey, testEmailA, testPasswordA)
 	userB := ensureTestUser(t, supabaseURL, serviceKey, testEmailB, testPasswordB)
+	testsupport.EnsureProfile(t, pool, userA, "CommitsTestA")
+	testsupport.EnsureProfile(t, pool, userB, "CommitsTestB")
 	tokenA := signInWithPassword(t, supabaseURL, anonKey, testEmailA, testPasswordA)
 	tokenB := signInWithPassword(t, supabaseURL, anonKey, testEmailB, testPasswordB)
 

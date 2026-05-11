@@ -129,7 +129,8 @@ file_size_limit = "50MiB"
 # every stack, so they're the single source of truth.
 #
 # Current buckets:
-#   - event-banners (#41) — server/db/migrations/0013_event_banners_storage_rls.up.sql
+#   - event-banners (#41) — server/db/migrations/0015_event_banners_storage_rls.up.sql
+#   - avatars (#88) — server/db/migrations/0018_avatars_storage_rls.up.sql
 
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]
