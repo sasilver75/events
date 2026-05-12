@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
   @Environment(AuthModel.self) private var auth
+  @State private var nav = AppNavigation()
 
   var body: some View {
     switch auth.phase {
@@ -23,12 +24,18 @@ struct RootView: View {
         // is identical.
         SignupView(initialStep: .selfie)
       case .complete:
-        TabView {
+        TabView(selection: Binding(get: { nav.selectedTab }, set: { nav.selectedTab = $0 })) {
           ContentView()
             .tabItem { Label("Map", systemImage: "map") }
+            .tag(AppTab.map)
+          YourEventsView()
+            .tabItem { Label("Your Events", systemImage: "calendar") }
+            .tag(AppTab.yourEvents)
           FriendsView()
             .tabItem { Label("Friends", systemImage: "person.2") }
+            .tag(AppTab.friends)
         }
+        .environment(nav)
       }
     }
   }
