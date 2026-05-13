@@ -69,16 +69,20 @@ Use `/tdd` for non-trivial features: red → green → refactor.
 
 ## Working flow
 
-- **Issues** → GitHub Issues at `sasilver75/events`. `/to-issues` for vertical
-  slices, `/triage` for state-machine moves. **Always triage before starting
-  work**: replace `needs-triage` with the right role label (`ready-for-agent`,
-  `ready-for-human`, `needs-info`, or `wontfix`). A closed issue must never
-  still carry `needs-triage`.
-- **PRDs** → `/to-prd` writes them to GitHub.
-- **Branches** → one per issue. PRs target `main`.
-- **PR titles** → when the work originates from a GitHub issue, append
-  `(#N)` to the title (e.g. `auth: Phase 1 iOS … (#9)`). GitHub auto-links
-  it and `gh pr list` becomes scannable for which PR addressed which issue.
+- **Issues** → Linear, Samcorp workspace, Spur project (team key `SAM`,
+  IDs look like `SAM-12`). PRs continue to live in GitHub at
+  `sasilver75/events`. `/to-issues` for vertical slices, `/triage` for
+  state-machine moves. **Always triage before starting work**: move an
+  issue out of `Backlog` into `Ready` with the right pickup label (`AFK`
+  for agent-claimable, `HITL` for human-required), or `Canceled` if
+  rejected. The previous GitHub Issues tracker is frozen — existing
+  issues remain there as a record; nothing new is filed against it.
+- **PRDs** → `/to-prd` publishes to Linear (Spur project, Backlog state).
+- **Branches** → one per Linear issue. PRs target `main`. Branch name
+  convention: `sam-<N>-<slug>` (e.g. `sam-12-feedback-flow`).
+- **PR titles** → append the Linear ID to the title (e.g.
+  `feat: post-event feedback flow (SAM-12)`). Linear's GitHub integration
+  auto-detects the SAM-id and links the PR to the issue.
 - **Commits** → conventional prose; WHY in the message body.
 - **Closeouts** → On every issue close, leave a comment. "Shipped per spec —
   <commit>" when the AC was met as written; a short drift list (what diverged
@@ -184,15 +188,27 @@ build artifacts. Rules:
 
 ### Issue tracker
 
-Issues live in GitHub Issues at `sasilver75/events`. See
+Issues live in Linear (Samcorp workspace, Spur project, team key `SAM`).
+PRs live in GitHub. See
 [`docs/agents/issue-tracker.md`](./docs/agents/issue-tracker.md).
 
 ### Triage labels
 
-Default mapping — canonical role names equal the label strings. See
+Canonical role names map to a combination of Linear workflow state and
+label (e.g. `ready-for-agent` → state `Ready` + label `AFK`). See
 [`docs/agents/triage-labels.md`](./docs/agents/triage-labels.md).
 
 ### Domain docs
 
 Single-context: [`CONTEXT.md`](./CONTEXT.md) + [`docs/adr/`](./docs/adr/) at
 the repo root. See [`docs/agents/domain.md`](./docs/agents/domain.md).
+
+### Harness (VM isolation for unattended agents)
+
+Tickets labeled `AFK` in Linear's `Ready` state are picked up by
+`scripts/spur-agent <SAM-id>`, which spawns a Tart macOS VM, drops the
+agent into it with `--dangerously-skip-permissions`, and reaps the VM
+when work is done. The multi-session coordination rules above (`.spur-sim`,
+`.spur-services`, port offsets) don't apply inside the VM — there's only
+one of each. See [`docs/agents/harness.md`](./docs/agents/harness.md) for
+the architecture and credentials model.

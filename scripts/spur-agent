@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# spur-agent — thin wrapper that invokes the orchestrator in one-shot
+# mode against a specific Linear issue. Same code path as the daemon
+# (`spur-orchestrator` with no flags); just a different invocation.
+#
+# Usage:
+#   scripts/spur-agent SAM-12
+#   scripts/spur-agent --shutdown SAM-12     (stop + delete the per-issue VM)
+#   scripts/spur-agent --help
+#
+# Requires the same env as the orchestrator daemon — see
+# `orchestrator/cmd/spur-orchestrator/main.go` doc comment.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ORCHESTRATOR_BIN="$REPO_ROOT/orchestrator/bin/spur-orchestrator"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/spur-agent <SAM-id>
+       scripts/spur-agent --shutdown <SAM-id>
+       scripts/spur-agent --help
+
+Dispatches one Linear issue through the agent harness:
+  1. clones spur-base into a per-issue Tart VM
+  2. runs the after_create / before_run hooks from WORKFLOW.md
+  3. launches Claude Code inside the VM with the rendered prompt
+  4. runs the after_run hook
+  5. leaves the VM stopped for inspection (run --shutdown to clean up)
+
+Required env vars (also documented in orchestrator/cmd/spur-orchestrator/main.go):
+  LINEAR_API_KEY                  Linear API key for tracker reads
+  SPUR_HARNESS_GITHUB_TOKEN       Fine-grained GitHub PAT scoped to sasilver75/events
+  SPUR_HARNESS_LINEAR_BOT_TOKEN   Linear API key for the bot account (may equal LINEAR_API_KEY)
+  SPUR_HARNESS_SSH_KEY            Path to harness SSH key (default ~/.ssh/spur-agent-vm)
+EOF
+}
+
+if [ $# -eq 0 ]; then
+  usage; exit 1
+fi
+
+case "$1" in
+  -h|--help) usage; exit 0 ;;
+  --shutdown)
+    if [ $# -lt 2 ]; then echo "missing issue id"; usage; exit 1; fi
+    vm_name="spur-ticket-$2"
+    echo "==> Stopping and deleting $vm_name"
+    tart stop "$vm_name" 2>/dev/null || true
+    tart delete "$vm_name" 2>/dev/null || { echo "(no such VM)"; exit 0; }
+    echo "==> Done"
+    exit 0
+    ;;
+esac
+
+ISSUE_ID="$1"
+
+# Build the orchestrator binary if missing or out of date.
+if [ ! -x "$ORCHESTRATOR_BIN" ] || [ "$(find "$REPO_ROOT/orchestrator" -name '*.go' -newer "$ORCHESTRATOR_BIN" 2>/dev/null | head -1)" ]; then
+  echo "==> Building spur-orchestrator..."
+  (cd "$REPO_ROOT/orchestrator" && go build -o bin/spur-orchestrator ./cmd/spur-orchestrator)
+fi
+
+echo "==> Dispatching $ISSUE_ID"
+exec "$ORCHESTRATOR_BIN" --workflow "$REPO_ROOT/WORKFLOW.md" --once --issue "$ISSUE_ID" "${@:2}"

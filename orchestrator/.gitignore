@@ -1,0 +1,5 @@
+# Compiled orchestrator binary (built via `go build` or `scripts/spur-agent`).
+bin/
+
+# Per-run logs the after_run hook may pull out of VMs.
+runs/

@@ -1,28 +1,52 @@
 # Triage Labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual label strings used in this repo's issue tracker.
+The skills speak in terms of five canonical triage roles. This file maps those roles to Linear's primitives (workflow states + labels) for the Samcorp/Spur project.
 
-| Label in mattpocock/skills | Label in our tracker | Meaning                                  |
-| -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
-| `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
+Linear doesn't use a single "label" axis like GitHub did. Roles map to a combination of **workflow state** (where the issue is in its lifecycle) and **label** (orthogonal flag for agent-pickup eligibility).
 
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
+| Canonical role (skills)  | Linear state   | Linear label | Meaning                                                              |
+| ------------------------ | -------------- | ------------ | -------------------------------------------------------------------- |
+| `needs-triage`           | `Backlog`      | *(none)*     | Captured, not yet refined. Default when a new issue is filed.        |
+| `needs-info`             | `Backlog`      | `needs-info` | Waiting on reporter for more information.                            |
+| `ready-for-agent`        | `Ready`        | `AFK`        | Fully specified, agent-claimable when all blockers are `Done`.       |
+| `ready-for-human`        | `Ready`        | `HITL`       | Pickup-ready but requires human hands (creds, App Store, etc.).      |
+| `wontfix`                | `Canceled`     | *(none)*     | Will not be actioned.                                                |
 
-Edit the right-hand column to match whatever vocabulary you actually use.
+Plus two **category** labels (orthogonal — apply alongside the AFK/HITL gate):
+
+| Canonical role | Linear label |
+| -------------- | ------------ |
+| `bug`          | `Bug`        |
+| `enhancement` | `Feature` (or `Improvement` for incremental polish) |
+
+Spur tickets should also carry one **area** label (orthogonal to everything above):
+
+- `area-ios` — Swift/SwiftUI/Xcode work
+- `area-server` — Go HTTP server
+- `area-supabase` — migrations, RLS, Auth, Realtime, Storage
+- `area-infra` — scripts, tooling, agent harness, CI
 
 ## Workflow
 
-**Before work starts.** Every issue begins as `needs-triage` (GitHub default). Transition the label to the appropriate role before any substantive work:
+**Before work starts.** Every issue begins in `Backlog`. Triage moves it to a pickup state:
 
-- HITL work (requires maintainer hands — credentials, hosted account setup, deploy platform, App Store submission, anything an unattended agent can't finish) → `ready-for-human`
-- Fully specified for unattended agent execution → `ready-for-agent`
-- Underspecified, awaiting reporter input → `needs-info`
-- Rejected → `wontfix`
+- HITL work (requires human hands) → state `Ready` + label `HITL`
+- Fully specified for unattended agent execution → state `Ready` + label `AFK`
+- Underspecified, awaiting reporter input → keep in `Backlog`, add label `needs-info`
+- Rejected → state `Canceled`
 
-`gh issue edit N --remove-label needs-triage --add-label <role>`, or run `/triage` if the right role is unclear.
+Use the Linear MCP `save_issue` tool with the appropriate `state` and `addLabels`. Or run `/triage` if the right role is unclear.
 
-**After close.** Role labels persist as a record of how the work got done — `ready-for-agent` on a closed issue means "completed via AFK agent," `ready-for-human` means "completed via HITL." The label vocabulary reads two ways depending on state ("ready for X" → "completed via X"); don't strip at close. The one exception is `needs-triage` — if it's still on a closed issue, the workflow was bypassed entirely and the label is genuinely stale.
+**During work.** When an agent or human starts on a `Ready` issue, move it to `In Progress`. When the PR opens, move it to `In Review`. When merged, move it to `Done`. If mid-flight work needs a human decision, move it to `Needs Human` rather than back to `Ready`.
+
+**After close.** The label persists as a record of how the work got done — an issue closed from `Ready`+`AFK` means "completed via AFK agent," `Ready`+`HITL` means "completed via HITL." Don't strip labels at close.
+
+## Agent pickup criteria
+
+For the `spur-agent` harness to claim a Linear issue automatically (or for a human to hand one off):
+
+1. `project = Spur`
+2. `state = Ready`
+3. `label includes AFK` (and does NOT include `HITL`)
+4. All `blocked-by` issues are in state `Done`
+5. `assignee` is empty or `@me`
