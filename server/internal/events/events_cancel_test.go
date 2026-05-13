@@ -14,6 +14,7 @@ import (
 
 	"github.com/sasilver75/events/server/internal/auth"
 	"github.com/sasilver75/events/server/internal/events"
+	"github.com/sasilver75/events/server/internal/testsupport"
 )
 
 // TestCancelEndpoint exercises DELETE /events/{id} per #32 + ADR 0001:
@@ -36,6 +37,7 @@ func TestCancelEndpoint(t *testing.T) {
 	defer pool.Close()
 
 	hostID := ensureTestUser(t, supabaseURL, serviceKey)
+	testsupport.EnsureProfile(t, pool, hostID, "EventsCancelTestHost")
 	token := signInWithPassword(t, supabaseURL, anonKey)
 
 	verifier, err := auth.NewVerifier(ctx, supabaseURL)

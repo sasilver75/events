@@ -19,6 +19,7 @@ import (
 	// constructed with a *pgxpool.Pool and bound to routes below. lifecycle
 	// is the in-process background loop (β-cancel today, Done-poller in #34).
 	"github.com/sasilver75/events/server/internal/auth"
+	"github.com/sasilver75/events/server/internal/chat"
 	"github.com/sasilver75/events/server/internal/checkins"
 	"github.com/sasilver75/events/server/internal/commits"
 	"github.com/sasilver75/events/server/internal/events"
@@ -77,9 +78,20 @@ func main() {
 	checkinsHandler := checkins.New(pool)
 	feedbackHandler := feedback.New(pool)
 	friendsHandler := friends.New(pool)
+	chatHandler := chat.New(pool)
+	chatHub := chat.NewHub(pool)
+	chatStream := chat.NewStream(chatHub)
 
-	// --- background lifecycle loop ---
+	// --- background loops ---
 	go lifecycle.New(pool).Run(appCtx)
+	// chat hub owns the single LISTEN connection for NOTIFY chat_message
+	// and fans payloads out to per-stream subscribers. Errors are logged;
+	// the hub auto-reconnects with backoff inside Run.
+	go func() {
+		if err := chatHub.Run(appCtx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("chat hub: %v", err)
+		}
+	}()
 
 	// --- router + routes ---
 	r := chi.NewRouter()
@@ -87,7 +99,6 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(15 * time.Second))
 
 	r.Get("/healthz", healthz)
 	r.Get("/legal/tos", legalHandler.GetTOS)
@@ -111,25 +122,41 @@ func main() {
 			r.Group(func(r chi.Router) {
 				r.Use(usersHandler.AvatarRequired)
 
-				r.Get("/me", auth.Me)
-				r.Get("/events", eventsHandler.Near)
-				r.Post("/events", eventsHandler.Create)
-				r.Delete("/events/{id}", eventsHandler.Cancel)
-				r.Post("/events/{id}/commit", commitsHandler.Commit)
-				r.Delete("/events/{id}/commit", commitsHandler.Withdraw)
-				r.Get("/users/me/commits", commitsHandler.MyCommits)
-				r.Post("/events/{id}/checkin", checkinsHandler.CheckIn)
-				r.Get("/events/{id}/feedback", feedbackHandler.List)
-				r.Post("/events/{id}/feedback", feedbackHandler.Submit)
+				// SSE / streaming routes (#65): no Timeout middleware,
+				// since chat streams stay open for the lifetime of the
+				// chat sheet — minutes, not seconds. The request
+				// context still cancels on client disconnect
+				// (URLSession close → TCP FIN → http.Server cancels),
+				// so the handler exits cleanly when the user dismisses.
+				r.Get("/events/{id}/messages/stream", chatStream.Handle)
 
-				r.Get("/friends", friendsHandler.ListFriends)
-				r.Delete("/friends/{friend_id}", friendsHandler.Unfriend)
-				r.Get("/friends/requests", friendsHandler.ListRequests)
-				r.Post("/friends/requests", friendsHandler.SendRequest)
-				r.Post("/friends/requests/{requester_id}/accept", friendsHandler.AcceptRequest)
-				r.Delete("/friends/requests/{requester_id}", friendsHandler.RejectRequest)
-				r.Delete("/friends/requests/sent/{recipient_id}", friendsHandler.WithdrawRequest)
-				r.Get("/friends/candidates", friendsHandler.SearchCandidates)
+				// Bounded-latency routes — everything else has a 15s
+				// ceiling. Anything approaching that is a bug.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.Timeout(15 * time.Second))
+
+					r.Get("/me", auth.Me)
+					r.Get("/events", eventsHandler.Near)
+					r.Post("/events", eventsHandler.Create)
+					r.Delete("/events/{id}", eventsHandler.Cancel)
+					r.Post("/events/{id}/commit", commitsHandler.Commit)
+					r.Delete("/events/{id}/commit", commitsHandler.Withdraw)
+					r.Get("/users/me/commits", commitsHandler.MyCommits)
+					r.Post("/events/{id}/checkin", checkinsHandler.CheckIn)
+					r.Get("/events/{id}/feedback", feedbackHandler.List)
+					r.Post("/events/{id}/feedback", feedbackHandler.Submit)
+					r.Get("/events/{id}/messages", chatHandler.History)
+					r.Post("/events/{id}/messages", chatHandler.Send)
+
+					r.Get("/friends", friendsHandler.ListFriends)
+					r.Delete("/friends/{friend_id}", friendsHandler.Unfriend)
+					r.Get("/friends/requests", friendsHandler.ListRequests)
+					r.Post("/friends/requests", friendsHandler.SendRequest)
+					r.Post("/friends/requests/{requester_id}/accept", friendsHandler.AcceptRequest)
+					r.Delete("/friends/requests/{requester_id}", friendsHandler.RejectRequest)
+					r.Delete("/friends/requests/sent/{recipient_id}", friendsHandler.WithdrawRequest)
+					r.Get("/friends/candidates", friendsHandler.SearchCandidates)
+				})
 			})
 		})
 	})

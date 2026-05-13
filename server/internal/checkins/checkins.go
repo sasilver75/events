@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/sasilver75/events/server/internal/auth"
+	"github.com/sasilver75/events/server/internal/chat"
 )
 
 // geofenceFloorMeters is the accuracy-aware radius from ADR 0011: a tap
@@ -139,20 +140,44 @@ func (h *Handler) CheckIn(w http.ResponseWriter, r *http.Request) {
 
 	// ON CONFLICT DO UPDATE SET event_id = excluded.event_id is a no-op
 	// that lets RETURNING surface the existing row's recorded_at — the
-	// idempotent path returns the original timestamp, not now().
-	var recordedAt time.Time
+	// idempotent path returns the original timestamp, not now(). The
+	// `xmax = 0` predicate tells fresh-insert from absorbed-conflict so we
+	// can fire the first-presence system message only once per attendee.
+	var (
+		recordedAt time.Time
+		firstShow  bool
+	)
 	if err := h.pool.QueryRow(ctx, `
 		INSERT INTO public.checkins (event_id, user_id)
 		VALUES ($1, $2)
 		ON CONFLICT (event_id, user_id) DO UPDATE SET event_id = excluded.event_id
-		RETURNING recorded_at
-	`, eventID, userID).Scan(&recordedAt); err != nil {
+		RETURNING recorded_at, (xmax = 0) AS first_show
+	`, eventID, userID).Scan(&recordedAt, &firstShow); err != nil {
 		writeError(w, http.StatusInternalServerError, "insert checkin: "+err.Error())
 		return
 	}
 
-	log.Printf("checkin event=%s user=%s outcome=accept distance_m=%.1f accuracy_m=%.1f",
-		eventID, userID, distance, in.HorizontalAccuracyM)
+	if firstShow {
+		// Fire the first-presence system message (#65, PRD §At-event).
+		// Best-effort: log and continue on failure. The chat message is a
+		// social signal, not load-bearing on the Show outcome itself.
+		// Wording is identical regardless of presence source so the
+		// passive-location path (#71) can hit the same insert verbatim.
+		var displayName *string
+		_ = h.pool.QueryRow(ctx,
+			`SELECT display_name FROM public.users WHERE id = $1`, userID,
+		).Scan(&displayName)
+		name := "Someone"
+		if displayName != nil && *displayName != "" {
+			name = *displayName
+		}
+		if _, err := chat.InsertSystemMessage(ctx, h.pool, eventID, name+" is here"); err != nil {
+			log.Printf("checkin event=%s user=%s system_message_err=%v", eventID, userID, err)
+		}
+	}
+
+	log.Printf("checkin event=%s user=%s outcome=accept distance_m=%.1f accuracy_m=%.1f first_show=%v",
+		eventID, userID, distance, in.HorizontalAccuracyM, firstShow)
 	writeJSON(w, http.StatusOK, checkinResponse{RecordedAt: recordedAt})
 }
 

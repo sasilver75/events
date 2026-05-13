@@ -269,6 +269,42 @@ func TestCheckInEndpoint(t *testing.T) {
 			t.Fatalf("expected 200, got %d body=%s", rec.Code, body)
 		}
 	})
+
+	// #65 first-presence wire: a successful check-in inserts a single
+	// kind='system' chat message; a repeat tap does NOT insert another.
+	t.Run("first check-in fires a system message; repeat does not", func(t *testing.T) {
+		eventID := insertLiveEvent(ctx, t, pool, hostID)
+		t.Cleanup(func() { deleteEvent(ctx, t, pool, eventID) })
+		insertCommit(ctx, t, pool, eventID, userA)
+
+		rec, body := doRequest(t, eventID, tokenA, checkinRequest{Lat: pinLat, Lon: pinLon, HorizontalAccuracyM: 5})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("first tap: expected 200, got %d body=%s", rec.Code, body)
+		}
+		var n int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM public.event_messages WHERE event_id = $1 AND kind = 'system'`,
+			eventID,
+		).Scan(&n); err != nil {
+			t.Fatalf("count system messages: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("after first tap: got %d system messages, want 1", n)
+		}
+
+		// Repeat tap — idempotent path, should NOT fire a second message.
+		rec, _ = doRequest(t, eventID, tokenA, checkinRequest{Lat: pinLat, Lon: pinLon, HorizontalAccuracyM: 5})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("repeat tap: expected 200, got %d", rec.Code)
+		}
+		_ = pool.QueryRow(ctx,
+			`SELECT count(*) FROM public.event_messages WHERE event_id = $1 AND kind = 'system'`,
+			eventID,
+		).Scan(&n)
+		if n != 1 {
+			t.Errorf("after repeat tap: got %d system messages, want still 1", n)
+		}
+	})
 }
 
 type latLon struct{ lat, lon float64 }

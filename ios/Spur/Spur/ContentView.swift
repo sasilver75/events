@@ -332,7 +332,13 @@ struct ContentView: View {
         committedByMe: true,
         checkedInByMe: false,
         state: link.state,
-        bannerPath: nil
+        bannerPath: nil,
+        // Deeplinks fire only for Events the user is Committed to, so:
+        // α — chat is open from creation; β — to reach this code path
+        // (an Event past its window in Recent) the Tip must already have
+        // fired (β auto-cancels at Tip-deadline if it hasn't). Either
+        // way, unlocked. Server is still the source of truth on Send.
+        chatUnlocked: true
       )
     }
     nav.pendingDeeplink = nil
