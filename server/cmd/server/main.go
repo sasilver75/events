@@ -117,6 +117,7 @@ func main() {
 				r.Delete("/events/{id}", eventsHandler.Cancel)
 				r.Post("/events/{id}/commit", commitsHandler.Commit)
 				r.Delete("/events/{id}/commit", commitsHandler.Withdraw)
+				r.Get("/users/me/commits", commitsHandler.MyCommits)
 				r.Post("/events/{id}/checkin", checkinsHandler.CheckIn)
 				r.Get("/events/{id}/feedback", feedbackHandler.List)
 				r.Post("/events/{id}/feedback", feedbackHandler.Submit)
