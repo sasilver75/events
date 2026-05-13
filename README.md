@@ -17,6 +17,8 @@ with explicit "upgrade before distribution" notes.
 - [`docs/adr/`](./docs/adr/) — architecture decision records. Hard-to-reverse
   + surprising + real-trade-off decisions.
 - [`CLAUDE.md`](./CLAUDE.md) — project conventions for AI-assisted work.
+- [`WORKFLOW.md`](./WORKFLOW.md) — Symphony-style unattended-agent workflow
+  contract consumed by the Spur orchestrator.
 
 ## Layout
 
@@ -26,6 +28,8 @@ with explicit "upgrade before distribution" notes.
 - [`scripts/`](./scripts/) — repo-level dev scripts
 - [`docs/`](./docs/) — ADRs and agent-skill pointer docs
 - [`explainers/`](./explainers/) — long-form rationale documents
+- [`orchestrator/`](./orchestrator/) — Symphony-like Linear → Tart VM →
+  Claude Code harness for unattended agent runs
 
 ## Architecture in one paragraph
 

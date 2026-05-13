@@ -63,6 +63,7 @@ func TestSortDispatch(t *testing.T) {
 type fakeTracker struct {
 	candidates []domain.Issue
 	states     map[string]string
+	terminal   []domain.Issue
 }
 
 func (f *fakeTracker) FetchCandidateIssues(ctx context.Context, _ []string) ([]domain.Issue, error) {
@@ -80,28 +81,56 @@ func (f *fakeTracker) FetchIssueStatesByIDs(ctx context.Context, ids []string) (
 }
 
 func (f *fakeTracker) FetchIssuesByStates(ctx context.Context, _ []string) ([]domain.Issue, error) {
-	return nil, nil
+	return f.terminal, nil
 }
 
 // recordingWorker captures every issue it was asked to run, then reports
 // the canned result.
 type recordingWorker struct {
-	mu     sync.Mutex
-	calls  []string
-	result WorkerResult
-	delay  time.Duration
+	mu            sync.Mutex
+	calls         []string
+	attempts      []*int
+	resumes       []string
+	cleanupCalls  []string
+	canceled      bool
+	waitForCancel bool
+	result        WorkerResult
+	delay         time.Duration
 }
 
-func (w *recordingWorker) Run(ctx context.Context, issue domain.Issue, attempt *int) WorkerResult {
+func (w *recordingWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, resumeSessionID string) WorkerResult {
 	w.mu.Lock()
 	w.calls = append(w.calls, issue.Identifier)
+	w.attempts = append(w.attempts, attempt)
+	w.resumes = append(w.resumes, resumeSessionID)
 	w.mu.Unlock()
+	if w.waitForCancel {
+		<-ctx.Done()
+		w.mu.Lock()
+		w.canceled = true
+		w.mu.Unlock()
+		return WorkerResult{Issue: issue, Status: domain.RunStatusCanceledByReconciliation}
+	}
 	if w.delay > 0 {
-		time.Sleep(w.delay)
+		select {
+		case <-time.After(w.delay):
+		case <-ctx.Done():
+			w.mu.Lock()
+			w.canceled = true
+			w.mu.Unlock()
+			return WorkerResult{Issue: issue, Status: domain.RunStatusCanceledByReconciliation}
+		}
 	}
 	res := w.result
 	res.Issue = issue
 	return res
+}
+
+func (w *recordingWorker) Cleanup(ctx context.Context, issue domain.Issue) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.cleanupCalls = append(w.cleanupCalls, issue.Identifier)
+	return nil
 }
 
 func TestRunOnce_DispatchesSingleIssue(t *testing.T) {
@@ -206,6 +235,102 @@ func TestTick_RespectsMaxConcurrentAgents(t *testing.T) {
 	o.mu.Unlock()
 	if running != 1 {
 		t.Errorf("running = %d, want 1", running)
+	}
+}
+
+func TestHandleWorkerResult_StopsAtMaxTurns(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1"}
+	cfg := validConfig()
+	cfg.Agent.MaxTurns = 1
+	o := New(nil, cfg, &fakeTracker{}, &recordingWorker{}, silentLogger())
+	o.state.Claimed[issue.ID] = struct{}{}
+
+	o.handleWorkerResult(WorkerResult{Issue: issue, Status: domain.RunStatusSucceeded})
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.state.RetryAttempts) != 0 {
+		t.Fatalf("retry attempts = %d, want 0", len(o.state.RetryAttempts))
+	}
+	if _, claimed := o.state.Claimed[issue.ID]; !claimed {
+		t.Fatal("issue claim was released after max_turns; want retained for operator review")
+	}
+}
+
+func TestRetryAttemptAndSessionArePassedToWorker(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
+	worker := &recordingWorker{result: WorkerResult{Status: domain.RunStatusSucceeded}}
+	o := New(nil, validConfig(), &fakeTracker{candidates: []domain.Issue{issue}}, worker, silentLogger())
+
+	o.handleWorkerResult(WorkerResult{Issue: issue, Status: domain.RunStatusSucceeded, SessionID: "sess-1"})
+	o.onRetryFire(issue, 1)
+	o.dispatchUpToCapacity(context.Background(), []domain.Issue{issue})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		worker.mu.Lock()
+		if len(worker.attempts) > 0 {
+			got := worker.attempts[0]
+			worker.mu.Unlock()
+			if got == nil || *got != 1 {
+				t.Fatalf("attempt = %v, want 1", got)
+			}
+			if worker.resumes[0] != "sess-1" {
+				t.Fatalf("resume session = %q, want sess-1", worker.resumes[0])
+			}
+			return
+		}
+		worker.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("worker was not called")
+}
+
+func TestReconcile_CancelsTerminalRunAndCleansWorkspace(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
+	tracker := &fakeTracker{
+		candidates: []domain.Issue{issue},
+		states:     map[string]string{issue.ID: "Done"},
+	}
+	worker := &recordingWorker{waitForCancel: true}
+	o := New(nil, validConfig(), tracker, worker, silentLogger())
+
+	o.dispatchUpToCapacity(context.Background(), []domain.Issue{issue})
+	o.reconcile(context.Background())
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		o.drainWorkerResults()
+		worker.mu.Lock()
+		canceled := worker.canceled
+		cleanupCalls := len(worker.cleanupCalls)
+		worker.mu.Unlock()
+		if canceled && cleanupCalls == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	t.Fatalf("canceled=%v cleanupCalls=%v, want canceled=true cleanupCalls=1", worker.canceled, worker.cleanupCalls)
+}
+
+func TestCleanupTerminalWorkspaces(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1"}
+	tracker := &fakeTracker{terminal: []domain.Issue{issue}}
+	worker := &recordingWorker{}
+	o := New(nil, validConfig(), tracker, worker, silentLogger())
+
+	o.cleanupTerminalWorkspaces(context.Background())
+
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	if !reflect.DeepEqual(worker.cleanupCalls, []string{"SAM-1"}) {
+		t.Fatalf("cleanup calls = %v, want [SAM-1]", worker.cleanupCalls)
 	}
 }
 

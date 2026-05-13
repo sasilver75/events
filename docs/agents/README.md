@@ -12,7 +12,7 @@ this repo uses.
 | File | Purpose |
 | --- | --- |
 | [`domain.md`](./domain.md) | How engineering skills consume `CONTEXT.md` and `docs/adr/` when exploring the codebase. |
-| [`issue-tracker.md`](./issue-tracker.md) | Binding of issue-tracker operations to GitHub Issues via the `gh` CLI. |
+| [`issue-tracker.md`](./issue-tracker.md) | Binding of issue-tracker operations to Linear, with GitHub retained for PRs. |
 | [`triage-labels.md`](./triage-labels.md) | Canonical role → label mapping (`needs-triage`, `ready-for-agent`, etc.) and the triage workflow. |
 
 ## Agent-prompt contract

@@ -20,9 +20,8 @@ orchestrator/
     │                           Workspace Manager.
     ├── agent/claudecode/       Spec §10 adapted: Claude Code headless mode
     │                           wrapped to match the spec's agent contract.
-    ├── orchestrator/           Spec §7-8: poll loop, state machine,
-    │                           dispatch, retry, reconciliation.
-    └── obs/                    Structured logging (spec §13).
+    └── orchestrator/           Spec §7-8: poll loop, state machine,
+                                dispatch, retry, reconciliation.
 ```
 
 ## Quick commands
@@ -35,4 +34,22 @@ go run ./cmd/spur-orchestrator --validate --workflow ../WORKFLOW.md
 
 ## Status
 
-Implementation is in progress, tracked under the agent harness task series. Currently complete: module bootstrap, domain types, WORKFLOW.md loader, typed ServiceConfig, Liquid prompt renderer. Next: Linear tracker adapter, Tart Workspace Manager, Claude Code Agent Runner, orchestrator state machine.
+The first usable harness pass is implemented and landed in the `0.1.0`
+agent-harness release. The current implementation includes:
+
+- `WORKFLOW.md` parsing, typed runtime config, validation, and prompt rendering.
+- A Linear tracker reader for candidate fetch, running-issue state refresh, and
+  terminal-state lookup support.
+- Spur-specific eligibility filtering: `Ready`/`In Progress`, `AFK` present,
+  `HITL` absent, blockers `Done`.
+- Tart VM workspace creation/reuse keyed by Linear issue identifier.
+- Host-side lifecycle hooks from `WORKFLOW.md`, including terminal
+  `before_remove` cleanup.
+- Claude Code headless runner over SSH into the VM.
+- Polling orchestrator state machine with dispatch, running-issue state refresh,
+  retry bookkeeping, cancellation, continuation resume, and `agent.max_turns`
+  enforcement.
+
+This is **Symphony-like**, not a drop-in reference implementation. The largest
+intentional differences are documented in
+[`docs/agents/harness.md`](../docs/agents/harness.md#spur-vs-symphony).

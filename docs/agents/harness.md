@@ -2,7 +2,14 @@
 
 How agents safely run Spur work end-to-end without supervision.
 
-The harness implements [OpenAI's Symphony spec](https://github.com/openai/symphony/blob/main/SPEC.md) adapted for Spur's environment. Symphony is "a long-running automation service that continuously reads work from an issue tracker (Linear), creates an isolated workspace for each issue, and runs a coding agent session for that issue inside the workspace" (spec §1).
+The harness is a **Symphony-inspired** implementation adapted for Spur's
+environment, not a drop-in copy of OpenAI's reference shape.
+[Symphony](https://github.com/openai/symphony/blob/main/SPEC.md) defines a
+long-running automation service that reads work from Linear, creates an
+isolated workspace for each issue, and runs a coding-agent session inside that
+workspace. The spec also draws an important boundary: Symphony is a
+scheduler/runner and tracker reader; ticket writes are normally performed by
+the agent according to the repo-owned `WORKFLOW.md`.
 
 The two artifacts are:
 
@@ -11,19 +18,66 @@ The two artifacts are:
 
 The two are kept apart deliberately. WORKFLOW.md is policy ("what the agent does for an issue"); `orchestrator/` is mechanism ("how issues get from Linear to a running agent").
 
-## Adaptations from Symphony
+## Spur vs Symphony
 
-| Spec assumption                                | Spur reality                                                                                                                                |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Workspace = filesystem directory               | Workspace = **Tart VM clone** of `spur-base`. Per-issue VM named `spur-ticket-<sanitized-issue-id>` (e.g. `spur-ticket-SAM-12`).            |
-| Hooks run on host with `cwd = workspace_path`  | Hooks run on host with `SPUR_VM_NAME`, `SPUR_VM_IP`, `SPUR_ISSUE_ID` env vars. They orchestrate VM interactions (`tart`, `ssh`) themselves. |
-| Agent Runner uses Codex App Server JSON-RPC    | Agent Runner uses **Claude Code headless mode** (`claude --print --output-format=stream-json` or the Agent SDK).                            |
-| `max_concurrent_agents` default 10             | Capped at **2** by Apple's macOS-guest license. Start at 1 for first runs.                                                                  |
-| `active_states: [Todo, In Progress]` default   | **`[Ready, In Progress]`**. Backlog/Todo are not pickup-eligible.                                                                            |
-| Pickup = "in active state, not running/claimed" | Same plus: label `AFK` present, label `HITL` absent, all blockers in `Done` state.                                                          |
-| Workspace cleanup on terminal state            | **Tart VM stopped and deleted when issue reaches `Done`/`Canceled`/`Duplicate`** (spec §9.1: workspaces persist across runs for the same issue). |
+| Symphony/reference shape | Spur harness today |
+| --- | --- |
+| Workspace = filesystem directory under a workspace root. | Workspace = **Tart VM clone** of `spur-base`. Per-issue VM named `spur-ticket-<sanitized-issue-id>` (e.g. `spur-ticket-SAM-12`). |
+| Hooks run with `cwd = workspace_path`. | Hooks run on the host with `SPUR_VM_NAME`, `SPUR_VM_IP`, `SPUR_ISSUE_ID`, and credentials in env. Hooks use `tart`, `ssh`, and `scp` to affect the VM. |
+| Agent Runner launches `codex app-server` and speaks the Codex app-server protocol. | Agent Runner launches **Claude Code headless** (`claude --print --verbose --output-format=stream-json --permission-mode bypassPermissions`) over SSH and normalizes its stream events. |
+| `WORKFLOW.md` front matter has a `codex` section. | Spur uses a `claudecode` extension section. The rest of the file follows the Symphony front-matter/prompt split. |
+| `max_concurrent_agents` default is 10. | Capped at **2** by Apple's macOS-guest license. Start at 1 for early operator runs. |
+| `active_states` default to `Todo` / `In Progress`. | Pickup states are **`Ready` / `In Progress`**. Backlog/Todo are not pickup-eligible. |
+| Candidate eligibility is primarily active-state plus not running/claimed. | Same base idea plus Spur policy: label `AFK` present, label `HITL` absent, all blockers in `Done`, and issue is in the Spur project. |
+| Workspace cleanup on terminal state removes filesystem workspaces. | Terminal-state cleanup stops and deletes the Tart VM, after running `before_remove` to collect final artifacts. |
+| Dynamic `WORKFLOW.md` reload is part of the full spec shape. | Not implemented yet. Config is loaded at orchestrator startup; restart to pick up workflow changes. |
+| Status surface is optional. | No dashboard yet. Operator visibility is structured logs plus per-run copied artifacts. |
 
-Everything else from the spec is implemented verbatim: §4 domain model, §5 WORKFLOW.md contract, §7 orchestration state machine, §8 poll loop, §9.5 safety invariants, §11 Linear integration.
+The practical alignment is strong at the architectural layer: repo-owned
+workflow policy, Linear as control plane, bounded dispatch, isolated per-issue
+workspaces, hooks, retries/reconciliation, and agent-owned handoff comments/PRs.
+The implementation deliberately diverges at the execution layer because Spur
+needs Xcode, iOS Simulator, Docker/Supabase, and macOS tooling inside each
+workspace.
+
+## Implementation status
+
+Implemented in the current Go orchestrator:
+
+- `WORKFLOW.md` loader: YAML front matter + Markdown prompt body.
+- Typed config layer for tracker, polling, workspace, hooks, agent, and
+  `claudecode`.
+- Liquid prompt rendering with the normalized issue model.
+- Linear tracker reader: candidate fetch, running-issue state refresh, and
+  terminal-state lookup.
+- Eligibility filter for `AFK`/`HITL` labels and blocked-by state.
+- Tart workspace manager: clone-or-reuse, boot, SSH readiness, stop/delete.
+- Host hook runner for `after_create`, `before_run`, `after_run`, and
+  `before_remove`.
+- Claude Code stream runner over SSH.
+- Orchestrator loop with single-authority in-memory state, bounded dispatch,
+  running-issue state refresh, completion integration, and retry bookkeeping.
+- Active cancellation when a running issue becomes terminal or otherwise
+  leaves the active state set.
+- Terminal workspace cleanup on daemon startup and after terminal-state
+  cancellation.
+- `agent.max_turns` enforcement for retries/continuation turns.
+- Continuation turns resume the prior Claude Code session when a `SessionID`
+  was emitted by the previous run.
+
+Not implemented or intentionally incomplete:
+
+- Codex app-server JSON-RPC integration. The current runner is Claude Code
+  headless, so Codex-specific protocol fields and rate-limit telemetry are not
+  present.
+- Dynamic `WORKFLOW.md` watch/reload.
+- A dedicated status UI/dashboard.
+- Host-side Linear mutations. By design, issue state changes and comments are
+  still performed by the agent per `WORKFLOW.md`, not by the orchestrator.
+- Automatic stuck-loop escalation after an agent finishes work but forgets the
+  closeout/state transition. Tracked as SAM-53.
+- Strong secret isolation. Credentials are injected into the VM per run; the
+  deferred upgrade is a host-held Linear proxy or equivalent dynamic tool.
 
 ## Why VMs and not Docker
 
@@ -42,11 +96,11 @@ Driven by the orchestrator following Symphony §7 and §8. Summarized here for t
 1. **Poll tick** (every `polling.interval_ms`). Reconcile running issues against tracker state, then fetch candidates from Linear matching `state ∈ active_states AND label = AFK AND label ≠ HITL AND blockers all Done`.
 2. **Dispatch.** Sort by `(priority asc, created_at oldest first, identifier tiebreak)`. Claim issues up to `max_concurrent_agents`.
 3. **Workspace prep.** `tart clone --copy-on-write spur-base spur-ticket-<id>`, `tart run`, wait for SSH. If VM already exists (continuation run), boot it.
-4. **`after_create` hook** (first run only). Clone repo into VM, check out a fresh branch `sam-<id>-<slug>`, run `scripts/spur-up.sh` to boot Supabase + Go server inside the VM.
+4. **`after_create` hook** (first run only). Clone or refresh the repo inside the VM and leave it on `main`.
 5. **`before_run` hook** (every run). Inject credentials (per "Credentials" section below). Fetch latest Linear ticket body via the orchestrator's Linear adapter. Write to `/tmp/issue.json` inside the VM.
-6. **Agent Runner.** Launch Claude Code headless inside the VM with the rendered WORKFLOW.md prompt. Stream events back to the orchestrator. Continuation turns per spec §7.1 if the issue is still active after a clean exit.
+6. **Agent Runner.** Launch Claude Code headless inside the VM with the rendered WORKFLOW.md prompt. The prompt instructs the agent to create the issue branch and to run `scripts/spur-up.sh` only for tickets that touch `server/`, `supabase/`, `ios/`, or migrations. Stream events back to the orchestrator.
 7. **`after_run` hook.** Collect logs, sync any artifacts the agent left in the VM out to the orchestrator's per-run log dir.
-8. **Reconciliation.** Each subsequent tick re-fetches tracker state for running issues. If state moves to terminal, orchestrator kills the worker and runs `before_remove` hook + `tart delete`.
+8. **Reconciliation.** Each subsequent tick re-fetches tracker state for running issues. If an issue reaches a terminal state, the orchestrator cancels the worker, runs `before_remove`, and deletes the Tart VM. If an issue leaves the active state set without becoming terminal, the orchestrator cancels the worker and releases the claim.
 
 ## Credentials
 

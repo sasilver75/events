@@ -33,12 +33,20 @@ type Tracker interface {
 // the issue to the worker, gets a result back, and decides what to do
 // next based on the result.
 type Worker interface {
-	Run(ctx context.Context, issue domain.Issue, attempt *int) WorkerResult
+	Run(ctx context.Context, issue domain.Issue, attempt *int, resumeSessionID string) WorkerResult
+}
+
+// CleanupWorker is implemented by concrete workers that know how to remove
+// their workspace primitive. The orchestrator decides when cleanup is needed;
+// the worker translates the issue into VM/filesystem actions.
+type CleanupWorker interface {
+	Cleanup(ctx context.Context, issue domain.Issue) error
 }
 
 // WorkerResult is what a Worker returns. Maps to Symphony spec §7.2.
 type WorkerResult struct {
 	Issue     domain.Issue
+	Attempt   *int
 	Status    domain.RunStatus
 	Error     string
 	SessionID string // for continuation turns
@@ -67,6 +75,11 @@ type Orchestrator struct {
 	// workerDone receives results from in-flight workers. The tick loop
 	// drains this channel during reconciliation.
 	workerDone chan WorkerResult
+
+	cancelRunning   map[string]context.CancelFunc
+	cleanupAfterRun map[string]struct{}
+	readyAttempts   map[string]int
+	readySessions   map[string]string
 }
 
 // New constructs an Orchestrator with empty runtime state.
@@ -89,8 +102,12 @@ func New(def *workflow.Definition, cfg workflow.ServiceConfig, t Tracker, w Work
 			RetryAttempts:       map[string]domain.RetryEntry{},
 			Completed:           map[string]struct{}{},
 		},
-		retryTimers: map[string]*time.Timer{},
-		workerDone:  make(chan WorkerResult, 16),
+		retryTimers:     map[string]*time.Timer{},
+		workerDone:      make(chan WorkerResult, 16),
+		cancelRunning:   map[string]context.CancelFunc{},
+		cleanupAfterRun: map[string]struct{}{},
+		readyAttempts:   map[string]int{},
+		readySessions:   map[string]string{},
 	}
 }
 
@@ -106,6 +123,7 @@ func (o *Orchestrator) RunDaemon(ctx context.Context) error {
 	if err := o.Config.Validate(); err != nil {
 		return err
 	}
+	o.cleanupTerminalWorkspaces(ctx)
 	interval := time.Duration(o.Config.Polling.IntervalMs) * time.Millisecond
 	if interval <= 0 {
 		interval = 30 * time.Second
@@ -173,7 +191,7 @@ func (o *Orchestrator) RunOnce(ctx context.Context, issueIdentifier string) erro
 	}
 
 	o.Logger.Info("dispatching one-shot", "issue", target.Identifier)
-	result := o.Worker.Run(ctx, *target, nil)
+	result := o.Worker.Run(ctx, *target, nil, "")
 	o.Logger.Info("one-shot complete",
 		"issue", target.Identifier,
 		"status", string(result.Status),
@@ -229,25 +247,62 @@ func (o *Orchestrator) drainWorkerResults() {
 // per spec §7.3 transition triggers (Worker Exit normal / abnormal).
 func (o *Orchestrator) handleWorkerResult(res WorkerResult) {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	delete(o.state.Running, res.Issue.ID)
+	delete(o.cancelRunning, res.Issue.ID)
+	_, cleanup := o.cleanupAfterRun[res.Issue.ID]
+	delete(o.cleanupAfterRun, res.Issue.ID)
+	if cleanup {
+		delete(o.state.Claimed, res.Issue.ID)
+		o.mu.Unlock()
+		o.cleanupIssue(context.Background(), res.Issue)
+		return
+	}
 
 	switch res.Status {
 	case domain.RunStatusSucceeded:
 		// Spec §7.1: schedule a short continuation retry to re-check
 		// whether the issue is still active.
-		o.scheduleRetryLocked(res.Issue, 1, "", 1*time.Second)
-	case domain.RunStatusFailed, domain.RunStatusTimedOut, domain.RunStatusStalled:
-		attempt := 1
-		if existing, ok := o.state.RetryAttempts[res.Issue.ID]; ok {
-			attempt = existing.Attempt + 1
+		nextAttempt, ok := o.nextAttemptLocked(res.Issue, res.Attempt)
+		if !ok {
+			o.mu.Unlock()
+			break
 		}
-		backoff := backoffDelay(attempt, o.Config.Agent.MaxRetryBackoffMs)
-		o.scheduleRetryLocked(res.Issue, attempt, res.Error, backoff)
+		if res.SessionID != "" {
+			o.readySessions[res.Issue.ID] = res.SessionID
+		}
+		o.scheduleRetryLocked(res.Issue, nextAttempt, "", 1*time.Second)
+		o.mu.Unlock()
+	case domain.RunStatusFailed, domain.RunStatusTimedOut, domain.RunStatusStalled:
+		nextAttempt, ok := o.nextAttemptLocked(res.Issue, res.Attempt)
+		if !ok {
+			o.mu.Unlock()
+			break
+		}
+		backoff := backoffDelay(nextAttempt, o.Config.Agent.MaxRetryBackoffMs)
+		o.scheduleRetryLocked(res.Issue, nextAttempt, res.Error, backoff)
+		o.mu.Unlock()
 	default:
 		// Canceled / reconciliation-killed: just release the claim.
 		delete(o.state.Claimed, res.Issue.ID)
+		o.mu.Unlock()
 	}
+}
+
+func (o *Orchestrator) nextAttemptLocked(issue domain.Issue, completedAttempt *int) (int, bool) {
+	completedTurns := 1
+	nextAttempt := 1
+	if completedAttempt != nil {
+		completedTurns = *completedAttempt + 1
+		nextAttempt = *completedAttempt + 1
+	}
+	if o.Config.Agent.MaxTurns > 0 && completedTurns >= o.Config.Agent.MaxTurns {
+		o.Logger.Warn("max turns reached; leaving issue claimed for operator review",
+			"issue", issue.Identifier,
+			"max_turns", o.Config.Agent.MaxTurns,
+			"completed_turns", completedTurns)
+		return 0, false
+	}
+	return nextAttempt, true
 }
 
 // scheduleRetryLocked schedules (or reschedules) a retry. Caller must
@@ -278,6 +333,7 @@ func (o *Orchestrator) onRetryFire(issue domain.Issue, attempt int) {
 	delete(o.state.RetryAttempts, issue.ID)
 	delete(o.retryTimers, issue.ID)
 	delete(o.state.Claimed, issue.ID)
+	o.readyAttempts[issue.ID] = attempt
 	o.Logger.Info("retry timer fired; releasing claim for re-dispatch",
 		"issue", issue.Identifier, "attempt", attempt)
 }
@@ -315,13 +371,16 @@ func (o *Orchestrator) reconcile(ctx context.Context) {
 		if _, terminal := terminalSet[state]; terminal {
 			o.Logger.Info("issue moved to terminal state mid-run; signaling cleanup",
 				"issue_id", id, "new_state", state)
-			// Worker context cancellation is owned by the worker's
-			// run context; orchestrator can't reach into the worker.
-			// In v0 we just log; full cancel comes when we add a
-			// context registry in the orchestrator. TODO(task#16).
+			if cancel, ok := o.cancelRunning[id]; ok {
+				cancel()
+			}
+			o.cleanupAfterRun[id] = struct{}{}
 		} else if _, active := activeSet[state]; !active {
 			o.Logger.Info("issue in neither active nor terminal state",
 				"issue_id", id, "state", state)
+			if cancel, ok := o.cancelRunning[id]; ok {
+				cancel()
+			}
 		}
 	}
 }
@@ -344,34 +403,81 @@ func (o *Orchestrator) dispatchUpToCapacity(ctx context.Context, sorted []domain
 			o.mu.Unlock()
 			continue
 		}
+		attempt := o.readyAttemptForLocked(issue.ID)
+		resumeSessionID := o.readySessionForLocked(issue.ID)
+
 		// Claim.
+		runCtx, cancel := context.WithCancel(ctx)
 		o.state.Claimed[issue.ID] = struct{}{}
 		o.state.Running[issue.ID] = domain.RunningEntry{
 			Issue:     issue,
 			StartedAt: time.Now(),
+			Attempt:   attempt,
 		}
+		o.cancelRunning[issue.ID] = cancel
 		o.mu.Unlock()
 
-		go o.runWorker(ctx, issue)
+		go o.runWorker(runCtx, issue, attempt, resumeSessionID)
 	}
+}
+
+func (o *Orchestrator) readyAttemptForLocked(issueID string) *int {
+	attempt, ok := o.readyAttempts[issueID]
+	if !ok {
+		return nil
+	}
+	delete(o.readyAttempts, issueID)
+	return &attempt
+}
+
+func (o *Orchestrator) readySessionForLocked(issueID string) string {
+	sessionID := o.readySessions[issueID]
+	delete(o.readySessions, issueID)
+	return sessionID
 }
 
 // runWorker invokes the Worker and pushes its result into workerDone.
 // The orchestrator integrates the result in the next tick.
-func (o *Orchestrator) runWorker(ctx context.Context, issue domain.Issue) {
+func (o *Orchestrator) runWorker(ctx context.Context, issue domain.Issue, attempt *int, resumeSessionID string) {
 	defer func() {
 		// Recover from worker panics so one bad worker doesn't take
 		// down the orchestrator.
 		if r := recover(); r != nil {
 			o.workerDone <- WorkerResult{
-				Issue:  issue,
-				Status: domain.RunStatusFailed,
-				Error:  "worker panic: " + toString(r),
+				Issue:   issue,
+				Attempt: attempt,
+				Status:  domain.RunStatusFailed,
+				Error:   "worker panic: " + toString(r),
 			}
 		}
 	}()
-	res := o.Worker.Run(ctx, issue, nil)
+	res := o.Worker.Run(ctx, issue, attempt, resumeSessionID)
+	res.Attempt = attempt
 	o.workerDone <- res
+}
+
+func (o *Orchestrator) cleanupTerminalWorkspaces(ctx context.Context) {
+	if _, ok := o.Worker.(CleanupWorker); !ok {
+		return
+	}
+	issues, err := o.Tracker.FetchIssuesByStates(ctx, o.Config.Tracker.TerminalStates)
+	if err != nil {
+		o.Logger.Warn("terminal workspace cleanup fetch failed", "err", err)
+		return
+	}
+	for _, issue := range issues {
+		o.cleanupIssue(ctx, issue)
+	}
+}
+
+func (o *Orchestrator) cleanupIssue(ctx context.Context, issue domain.Issue) {
+	cleaner, ok := o.Worker.(CleanupWorker)
+	if !ok {
+		return
+	}
+	if err := cleaner.Cleanup(ctx, issue); err != nil {
+		o.Logger.Warn("workspace cleanup failed", "issue", issue.Identifier, "err", err)
+	}
 }
 
 // sortDispatch implements spec §8.2 sort order:

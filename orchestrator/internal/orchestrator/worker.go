@@ -55,7 +55,7 @@ type Credentials struct {
 // Run executes one full ticket lifecycle and returns a WorkerResult.
 // Errors are captured in the result, not returned, so the orchestrator
 // can always integrate the outcome into its state machine.
-func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int) WorkerResult {
+func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, resumeSessionID string) WorkerResult {
 	logger := w.Logger.With("issue", issue.Identifier)
 	logger.Info("worker starting", "title", issue.Title, "state", issue.State)
 
@@ -117,7 +117,7 @@ func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int) 
 		"LINEAR_API_KEY": w.HarnessCreds.LinearToken,
 	}
 	logger.Info("launching agent")
-	agentResult, runErr := w.AgentRunner.Run(ctx, vmIP, prompt, "", func(ev claudecode.Event) {
+	agentResult, runErr := w.AgentRunner.Run(ctx, vmIP, prompt, resumeSessionID, func(ev claudecode.Event) {
 		// Lightweight live logging; high-volume fan-out goes to a log
 		// sink in a real deployment.
 		if ev.Type == claudecode.EventSessionStarted {
@@ -149,6 +149,48 @@ func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int) 
 		SessionID: agentResult.SessionID,
 		Tokens:    agentResult.Usage.TotalTokens,
 	}
+}
+
+// Cleanup runs the terminal workspace cleanup path for an issue. It boots an
+// existing VM if needed so before_remove can collect artifacts, then stops and
+// deletes the Tart workspace.
+func (w *SpurWorker) Cleanup(ctx context.Context, issue domain.Issue) error {
+	vmName := tart.VMNameFor(issue.Identifier)
+	exists, err := w.WorkspaceMgr.Exists(ctx, vmName)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	workspace, vmIP, err := w.WorkspaceMgr.EnsureWorkspace(ctx, issue.Identifier)
+	if err != nil {
+		return err
+	}
+
+	issueJSON, _ := json.Marshal(issue)
+	hookEnv := tart.HookEnv{
+		VMName:           workspace.Path,
+		VMIP:             vmIP,
+		IssueID:          issue.ID,
+		IssueIdentifier:  issue.Identifier,
+		IssueJSON:        string(issueJSON),
+		GitHubToken:      w.HarnessCreds.GitHubToken,
+		LinearToken:      w.HarnessCreds.LinearToken,
+		RunLogDir:        w.runLogDirFor(issue, nil),
+		SSHKey:           w.WorkspaceMgr.SSHKey,
+		HarnessClaudeDir: w.HarnessCreds.ClaudeHarnessDir,
+	}
+
+	hookTimeout := time.Duration(w.Config.Hooks.TimeoutMs) * time.Millisecond
+	if w.Config.Hooks.BeforeRemove != "" {
+		if out, err := tart.RunHook(ctx, "before_remove", w.Config.Hooks.BeforeRemove, hookEnv, hookTimeout); err != nil {
+			w.Logger.Warn("before_remove hook failed (continuing with VM delete)",
+				"issue", issue.Identifier, "err", err, "out", trim(string(out), 400))
+		}
+	}
+	return w.WorkspaceMgr.RemoveWorkspace(ctx, workspace.Path)
 }
 
 func mapAgentEventToStatus(t claudecode.EventType) domain.RunStatus {
