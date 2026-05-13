@@ -65,6 +65,10 @@ type nearbyEvent struct {
 	CheckedInByMe bool      `json:"checked_in_by_me"`
 	State         string    `json:"state"`
 	BannerPath    *string   `json:"banner_path,omitempty"`
+	// ChatUnlocked is α-always-true (post-Commit) or β-true-iff-Tipped.
+	// Derived server-side so iOS doesn't need to know about tip_threshold;
+	// the actual write-gate lives in chat.Handler.Send (#65).
+	ChatUnlocked bool `json:"chat_unlocked"`
 }
 
 // Near handles GET /events?near=lat,lon&radius_m=…
@@ -128,7 +132,8 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 			(c.user_id IS NOT NULL) AS committed_by_me,
 			(ck.user_id IS NOT NULL) AS checked_in_by_me,
 			public.event_state(e) AS state,
-			e.banner_path
+			e.banner_path,
+			(e.tip_threshold IS NULL OR e.tipped_at IS NOT NULL) AS chat_unlocked
 		FROM public.events e
 		LEFT JOIN public.commits c
 			ON c.event_id = e.id AND c.user_id = $3
@@ -157,7 +162,7 @@ func (h *Handler) Near(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(
 			&e.ID, &e.Title, &e.Description, &e.Category, &e.StartTime, &e.EndTime,
 			&e.Lat, &e.Lon, &e.Cap, &e.CommitCount, &e.CommittedByMe, &e.CheckedInByMe, &e.State,
-			&e.BannerPath,
+			&e.BannerPath, &e.ChatUnlocked,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan: "+err.Error())
 			return

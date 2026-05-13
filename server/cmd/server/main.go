@@ -19,6 +19,7 @@ import (
 	// constructed with a *pgxpool.Pool and bound to routes below. lifecycle
 	// is the in-process background loop (β-cancel today, Done-poller in #34).
 	"github.com/sasilver75/events/server/internal/auth"
+	"github.com/sasilver75/events/server/internal/chat"
 	"github.com/sasilver75/events/server/internal/checkins"
 	"github.com/sasilver75/events/server/internal/commits"
 	"github.com/sasilver75/events/server/internal/events"
@@ -66,9 +67,20 @@ func main() {
 	checkinsHandler := checkins.New(pool)
 	feedbackHandler := feedback.New(pool)
 	friendsHandler := friends.New(pool)
+	chatHandler := chat.New(pool)
+	chatHub := chat.NewHub(pool)
+	chatStream := chat.NewStream(chatHub)
 
-	// --- background lifecycle loop ---
+	// --- background loops ---
 	go lifecycle.New(pool).Run(appCtx)
+	// chat hub owns the single LISTEN connection for NOTIFY chat_message
+	// and fans payloads out to per-stream subscribers. Errors are logged;
+	// the hub auto-reconnects with backoff inside Run.
+	go func() {
+		if err := chatHub.Run(appCtx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("chat hub: %v", err)
+		}
+	}()
 
 	// --- router + routes ---
 	r := chi.NewRouter()
@@ -76,11 +88,23 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(15 * time.Second))
 
 	r.Get("/healthz", healthz)
 
+	// SSE / streaming routes (#65): no global Timeout middleware, since
+	// chat streams stay open for the lifetime of the chat sheet — minutes,
+	// not seconds. The request context still cancels on client disconnect
+	// (URLSession close → TCP FIN → http.Server cancels), so the handler
+	// exits cleanly when the user dismisses the sheet.
 	r.Group(func(r chi.Router) {
+		r.Use(verifier.Middleware)
+		r.Get("/events/{id}/messages/stream", chatStream.Handle)
+	})
+
+	// Bounded-latency routes — everything else has a 15s ceiling. Anything
+	// approaching that is a bug.
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Timeout(15 * time.Second))
 		r.Use(verifier.Middleware)
 		r.Get("/me", auth.Me)
 		r.Get("/events", eventsHandler.Near)
@@ -91,6 +115,8 @@ func main() {
 		r.Post("/events/{id}/checkin", checkinsHandler.CheckIn)
 		r.Get("/events/{id}/feedback", feedbackHandler.List)
 		r.Post("/events/{id}/feedback", feedbackHandler.Submit)
+		r.Get("/events/{id}/messages", chatHandler.History)
+		r.Post("/events/{id}/messages", chatHandler.Send)
 
 		r.Get("/friends", friendsHandler.ListFriends)
 		r.Delete("/friends/{friend_id}", friendsHandler.Unfriend)

@@ -20,6 +20,10 @@ struct NearbyEvent: Decodable, Identifiable, Hashable {
   var checkedInByMe: Bool
   let state: String
   let bannerPath: String?
+  // α-always-true once Committed; β-true iff post-Tip. Derived server-side
+  // so iOS doesn't reproduce the lock semantics. Gates the chat affordance
+  // in EventDetailSheet (#65).
+  let chatUnlocked: Bool
 
   enum CodingKeys: String, CodingKey {
     case id, title, description, category
@@ -31,6 +35,7 @@ struct NearbyEvent: Decodable, Identifiable, Hashable {
     case checkedInByMe = "checked_in_by_me"
     case state
     case bannerPath = "banner_path"
+    case chatUnlocked = "chat_unlocked"
   }
 
   var coordinate: CLLocationCoordinate2D {

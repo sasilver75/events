@@ -22,6 +22,7 @@ struct EventDetailSheet: View {
   @State private var checkedIn: Bool
   @State private var checkInInFlight = false
   @State private var checkInError: String?
+  @State private var showChat = false
 
   init(
     event: NearbyEvent,
@@ -60,6 +61,9 @@ struct EventDetailSheet: View {
                   .foregroundStyle(.red)
               }
             }
+            if showChatAffordance {
+              chatButton
+            }
             Divider()
             description
           }
@@ -72,6 +76,29 @@ struct EventDetailSheet: View {
     }
     .presentationDetents([.medium, .large])
     .presentationDragIndicator(.visible)
+    .sheet(isPresented: $showChat) {
+      ChatSheet(event: event)
+        .environment(auth)
+    }
+  }
+
+  // Chat affordance — visible to Committed Attendees on unlocked Events.
+  // β-Events pre-Tip carry chatUnlocked=false; α-Events always carry true.
+  // Server enforces the lock on Send; this UI gate avoids dead taps.
+  private var showChatAffordance: Bool {
+    committedByMe && event.chatUnlocked
+  }
+
+  private var chatButton: some View {
+    Button(action: { showChat = true }) {
+      HStack {
+        Image(systemName: "bubble.left.and.bubble.right.fill")
+        Text("Open chat").font(.headline)
+      }
+      .frame(maxWidth: .infinity, minHeight: 44)
+    }
+    .buttonStyle(.bordered)
+    .accessibilityIdentifier("eventDetail.chatButton")
   }
 
   // Hero banner. Public-read bucket means a plain AsyncImage works —
