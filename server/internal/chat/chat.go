@@ -22,7 +22,7 @@ import (
 	"github.com/sasilver75/events/server/internal/auth"
 )
 
-// maxBodyLen mirrors the schema CHECK in 0017_event_messages.up.sql. Kept
+// maxBodyLen mirrors the schema CHECK in 0019_event_messages.up.sql. Kept
 // in lock-step with the DB constraint so the handler returns a clean 400
 // before Postgres rejects the row.
 const maxBodyLen = 2000

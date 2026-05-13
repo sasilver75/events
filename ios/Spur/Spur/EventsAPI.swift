@@ -253,6 +253,75 @@ enum EventsAPI {
     }
   }
 
+  // Projection shape of GET /users/me/commits. Mirrors
+  // server/internal/commits/my_commits.go. The endpoint returns two
+  // ascending-by-start_time windows — `upcoming` (end_time > now) and
+  // `recent` (end_time within last 7 days). Withdrawn Commits are excluded
+  // server-side; Cancelled Events still appear with state="Cancelled".
+  struct MyCommitEvent: Decodable, Identifiable, Hashable {
+    let id: String
+    let title: String
+    let category: String
+    let startTime: Date
+    let endTime: Date
+    let lat: Double
+    let lon: Double
+    let state: String
+
+    enum CodingKeys: String, CodingKey {
+      case id, title, category
+      case startTime = "start_time"
+      case endTime = "end_time"
+      case lat, lon, state
+    }
+
+    var coordinate: CLLocationCoordinate2D {
+      CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    var categoryEnum: EventCategory { .from(category) }
+  }
+
+  struct MyCommits: Decodable {
+    let upcoming: [MyCommitEvent]
+    let recent: [MyCommitEvent]
+  }
+
+  static func fetchMyCommits(auth: AuthModel) async throws -> MyCommits {
+    guard let token = await auth.accessToken() else { throw APIError.noToken }
+
+    let url = SupabaseConfig.serverURL
+      .appendingPathComponent("users")
+      .appendingPathComponent("me")
+      .appendingPathComponent("commits")
+
+    var req = URLRequest(url: url)
+    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let data: Data
+    let resp: URLResponse
+    do {
+      (data, resp) = try await URLSession.shared.data(for: req)
+    } catch let urlErr as URLError where urlErr.code == .cancelled {
+      throw CancellationError()
+    } catch {
+      throw APIError.transport(error.localizedDescription)
+    }
+
+    let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+    guard code == 200 else {
+      throw APIError.http(code, String(data: data, encoding: .utf8) ?? "")
+    }
+
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601withFractionalSeconds
+    do {
+      return try decoder.decode(MyCommits.self, from: data)
+    } catch {
+      throw APIError.decode(error.localizedDescription)
+    }
+  }
+
   static func commit(eventID: String, auth: AuthModel) async throws -> CommitState {
     try await commitMutation(eventID: eventID, method: "POST", auth: auth)
   }

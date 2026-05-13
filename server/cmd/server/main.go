@@ -25,7 +25,9 @@ import (
 	"github.com/sasilver75/events/server/internal/events"
 	"github.com/sasilver75/events/server/internal/feedback"
 	"github.com/sasilver75/events/server/internal/friends"
+	"github.com/sasilver75/events/server/internal/legal"
 	"github.com/sasilver75/events/server/internal/lifecycle"
+	"github.com/sasilver75/events/server/internal/users"
 )
 
 func main() {
@@ -42,6 +44,10 @@ func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Fatalf("DATABASE_URL must be set")
+	}
+	tosPath := os.Getenv("TOS_PATH")
+	if tosPath == "" {
+		tosPath = "docs/legal/tos-v1.md"
 	}
 
 	// --- dependencies (auth verifier + pgx pool) ---
@@ -62,6 +68,11 @@ func main() {
 	defer pool.Close()
 
 	// --- handlers (one per internal package) ---
+	legalHandler, err := legal.New(tosPath)
+	if err != nil {
+		log.Fatalf("legal handler: %v", err)
+	}
+	usersHandler := users.New(pool, legalHandler.TOSVersion())
 	eventsHandler := events.New(pool)
 	commitsHandler := commits.New(pool)
 	checkinsHandler := checkins.New(pool)
@@ -90,42 +101,64 @@ func main() {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/healthz", healthz)
+	r.Get("/legal/tos", legalHandler.GetTOS)
 
-	// SSE / streaming routes (#65): no global Timeout middleware, since
-	// chat streams stay open for the lifetime of the chat sheet — minutes,
-	// not seconds. The request context still cancels on client disconnect
-	// (URLSession close → TCP FIN → http.Server cancels), so the handler
-	// exits cleanly when the user dismisses the sheet.
 	r.Group(func(r chi.Router) {
 		r.Use(verifier.Middleware)
-		r.Get("/events/{id}/messages/stream", chatStream.Handle)
-	})
 
-	// Bounded-latency routes — everything else has a 15s ceiling. Anything
-	// approaching that is a bug.
-	r.Group(func(r chi.Router) {
-		r.Use(middleware.Timeout(15 * time.Second))
-		r.Use(verifier.Middleware)
-		r.Get("/me", auth.Me)
-		r.Get("/events", eventsHandler.Near)
-		r.Post("/events", eventsHandler.Create)
-		r.Delete("/events/{id}", eventsHandler.Cancel)
-		r.Post("/events/{id}/commit", commitsHandler.Commit)
-		r.Delete("/events/{id}/commit", commitsHandler.Withdraw)
-		r.Post("/events/{id}/checkin", checkinsHandler.CheckIn)
-		r.Get("/events/{id}/feedback", feedbackHandler.List)
-		r.Post("/events/{id}/feedback", feedbackHandler.Submit)
-		r.Get("/events/{id}/messages", chatHandler.History)
-		r.Post("/events/{id}/messages", chatHandler.Send)
+		// Authenticated, but profile may not exist yet (these endpoints
+		// are exactly how the user *creates* the profile, or probes for
+		// handle availability before creating it).
+		r.Post("/users/me/profile", usersHandler.PostProfile)
+		r.Head("/users/handle/{handle}", usersHandler.HeadHandle)
 
-		r.Get("/friends", friendsHandler.ListFriends)
-		r.Delete("/friends/{friend_id}", friendsHandler.Unfriend)
-		r.Get("/friends/requests", friendsHandler.ListRequests)
-		r.Post("/friends/requests", friendsHandler.SendRequest)
-		r.Post("/friends/requests/{requester_id}/accept", friendsHandler.AcceptRequest)
-		r.Delete("/friends/requests/{requester_id}", friendsHandler.RejectRequest)
-		r.Delete("/friends/requests/sent/{recipient_id}", friendsHandler.WithdrawRequest)
-		r.Get("/friends/candidates", friendsHandler.SearchCandidates)
+		r.Group(func(r chi.Router) {
+			r.Use(usersHandler.ProfileRequired)
+
+			// Profile exists, avatar may not. Avatar upload itself
+			// lives here so the user can finish signup.
+			r.Post("/users/me/avatar", usersHandler.PostAvatar)
+
+			r.Group(func(r chi.Router) {
+				r.Use(usersHandler.AvatarRequired)
+
+				// SSE / streaming routes (#65): no Timeout middleware,
+				// since chat streams stay open for the lifetime of the
+				// chat sheet — minutes, not seconds. The request
+				// context still cancels on client disconnect
+				// (URLSession close → TCP FIN → http.Server cancels),
+				// so the handler exits cleanly when the user dismisses.
+				r.Get("/events/{id}/messages/stream", chatStream.Handle)
+
+				// Bounded-latency routes — everything else has a 15s
+				// ceiling. Anything approaching that is a bug.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.Timeout(15 * time.Second))
+
+					r.Get("/me", auth.Me)
+					r.Get("/events", eventsHandler.Near)
+					r.Post("/events", eventsHandler.Create)
+					r.Delete("/events/{id}", eventsHandler.Cancel)
+					r.Post("/events/{id}/commit", commitsHandler.Commit)
+					r.Delete("/events/{id}/commit", commitsHandler.Withdraw)
+					r.Get("/users/me/commits", commitsHandler.MyCommits)
+					r.Post("/events/{id}/checkin", checkinsHandler.CheckIn)
+					r.Get("/events/{id}/feedback", feedbackHandler.List)
+					r.Post("/events/{id}/feedback", feedbackHandler.Submit)
+					r.Get("/events/{id}/messages", chatHandler.History)
+					r.Post("/events/{id}/messages", chatHandler.Send)
+
+					r.Get("/friends", friendsHandler.ListFriends)
+					r.Delete("/friends/{friend_id}", friendsHandler.Unfriend)
+					r.Get("/friends/requests", friendsHandler.ListRequests)
+					r.Post("/friends/requests", friendsHandler.SendRequest)
+					r.Post("/friends/requests/{requester_id}/accept", friendsHandler.AcceptRequest)
+					r.Delete("/friends/requests/{requester_id}", friendsHandler.RejectRequest)
+					r.Delete("/friends/requests/sent/{recipient_id}", friendsHandler.WithdrawRequest)
+					r.Get("/friends/candidates", friendsHandler.SearchCandidates)
+				})
+			})
+		})
 	})
 
 	// --- HTTP server lifecycle (start + graceful shutdown on SIGINT/SIGTERM) ---

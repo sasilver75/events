@@ -1,5 +1,6 @@
-// Package commits serves the Commit/Withdraw write endpoints. The Browse
-// read path lives in package events; this package is intentionally narrow.
+// Package commits serves the Commit/Withdraw write endpoints, plus the
+// caller-scoped GET /users/me/commits read used by the "Your Events" tab.
+// The Browse read path (all Events near a point) lives in package events.
 package commits
 
 import (

@@ -1,5 +1,7 @@
 # Mirror auth.users → public.users via a Postgres trigger
 
+**Status:** Superseded by [ADR 0025](./0025-public-users-row-created-by-profile-post.md) (2026-05-09). The trigger was correct while `public.users` only mirrored `id`; once profile fields landed, the row's existence stopped implying signup completion and the trigger no longer earned its keep.
+
 A Postgres trigger on `auth.users` mirrors the row's `id` into `public.users` inside Supabase Auth's own transaction. The Go server does **not** perform a lazy upsert on every authenticated request. This refines [ADR 0005](./0005-supabase-data-plane-go-server-business-logic.md)'s mechanical-trigger carve-out by recording what counts as "mechanical" and what does not.
 
 ## Why

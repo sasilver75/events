@@ -18,6 +18,9 @@ const SeedCount = 3
 const (
 	spurSeedEmail   = "spur-seed@spur.local"
 	spurSeedDisplay = "Spur Seed"
+	spurSeedHandle  = "spurseed"
+	spurSeedDOB     = "1990-01-01"
+	spurSeedTosVer  = "v1"
 )
 
 func Run(ctx context.Context) error {
@@ -53,10 +56,20 @@ func Run(ctx context.Context) error {
 
 func upsertPublicSeedUser(ctx context.Context, conn *pgx.Conn, id string) error {
 	_, err := conn.Exec(ctx, `
-		INSERT INTO public.users (id, display_name)
-		VALUES ($1, $2)
-		ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name
-	`, id, spurSeedDisplay)
+		INSERT INTO public.users (
+			id, display_name,
+			handle, handle_display,
+			dob, tos_accepted_at, tos_version
+		)
+		VALUES ($1, $2, $3, $3, $4, now(), $5)
+		ON CONFLICT (id) DO UPDATE SET
+			display_name    = EXCLUDED.display_name,
+			handle          = EXCLUDED.handle,
+			handle_display  = EXCLUDED.handle_display,
+			dob             = EXCLUDED.dob,
+			tos_accepted_at = EXCLUDED.tos_accepted_at,
+			tos_version     = EXCLUDED.tos_version
+	`, id, spurSeedDisplay, spurSeedHandle, spurSeedDOB, spurSeedTosVer)
 	return err
 }
 

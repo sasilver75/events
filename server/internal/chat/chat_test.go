@@ -18,6 +18,7 @@ import (
 
 	"github.com/sasilver75/events/server/internal/auth"
 	"github.com/sasilver75/events/server/internal/chat"
+	"github.com/sasilver75/events/server/internal/testsupport"
 )
 
 const (
@@ -57,6 +58,10 @@ func TestSendMessageEndpoint(t *testing.T) {
 	userA := userIDFromToken(t, supabaseURL, serviceKey, testEmailA)
 	userB := userIDFromToken(t, supabaseURL, serviceKey, testEmailB)
 	_ = userB
+	// Profile rows are required by the FK from public.commits.user_id since
+	// #88 dropped the auth.users → public.users mirror trigger (ADR 0025).
+	testsupport.EnsureProfile(t, pool, userA, "ChatTestA")
+	testsupport.EnsureProfile(t, pool, userB, "ChatTestB")
 
 	verifier, err := auth.NewVerifier(ctx, supabaseURL)
 	if err != nil {
@@ -238,6 +243,9 @@ func TestHistoryEndpoint(t *testing.T) {
 	tokenA := signInWithPassword(t, supabaseURL, anonKey, testEmailA, testPasswordA)
 	tokenB := signInWithPassword(t, supabaseURL, anonKey, testEmailB, testPasswordB)
 	userA := userIDFromToken(t, supabaseURL, serviceKey, testEmailA)
+	userB := userIDFromToken(t, supabaseURL, serviceKey, testEmailB)
+	testsupport.EnsureProfile(t, pool, userA, "ChatTestA")
+	testsupport.EnsureProfile(t, pool, userB, "ChatTestB")
 
 	verifier, err := auth.NewVerifier(ctx, supabaseURL)
 	if err != nil {
@@ -363,7 +371,7 @@ func TestHistoryEndpoint(t *testing.T) {
 		t.Cleanup(func() { deleteEvent(ctx, t, pool, eventID) })
 		insertCommit(ctx, t, pool, eventID, userA)
 
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			insertUserMessage(ctx, t, pool, eventID, userA, fmt.Sprintf("m%d", i))
 		}
 		rec, body := get(t, eventID, tokenA, "limit=2")

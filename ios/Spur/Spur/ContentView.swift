@@ -3,7 +3,9 @@ import SwiftUI
 
 struct ContentView: View {
   @Environment(AuthModel.self) private var auth
+  @Environment(AppNavigation.self) private var nav
   @State private var location = LocationManager()
+  @State private var mapFlyTo: MapView.FlyTo?
   // FeedbackPresenter.shared is the singleton bridge from
   // UNUserNotificationCenterDelegate (which lives outside the SwiftUI
   // view tree) to a sheet presented inside the tree.
@@ -50,7 +52,8 @@ struct ContentView: View {
         zoom: 11,
         events: events,
         onSelect: { selectedEvent = $0 },
-        centerBinding: $viewportCenter
+        centerBinding: $viewportCenter,
+        flyTo: mapFlyTo
       )
       .ignoresSafeArea()
 
@@ -91,6 +94,10 @@ struct ContentView: View {
       // Fall back to the LA center so the user still sees Events.
       guard err != nil else { return }
       Task { await fetchWithFallback() }
+    }
+    .onChange(of: nav.pendingDeeplink) { _, link in
+      guard let link else { return }
+      consumeDeeplink(link)
     }
     .sheet(isPresented: $showingPermissionPrompt) {
       LocationPermissionView(
@@ -298,6 +305,43 @@ struct ContentView: View {
 
   private func refetchAfterCreate() async {
     await fetch(near: location.lastFix ?? Self.losAngeles)
+  }
+
+  // Honour a Your-Events deeplink: pan the map to the pin, then present the
+  // EventDetailSheet for that Event. Prefers the in-memory NearbyEvent from
+  // the current browse fetch (full projection — banner, description, commit
+  // count) and falls back to a synthesised NearbyEvent from the limited
+  // MyCommits projection when the deeplinked Event is outside the map's
+  // window (typical for "Recent" rows whose end_time has already passed).
+  private func consumeDeeplink(_ link: AppNavigation.Deeplink) {
+    mapFlyTo = MapView.FlyTo(coordinate: link.coordinate, zoom: 15)
+    if let existing = events.first(where: { $0.id == link.eventID }) {
+      selectedEvent = existing
+    } else {
+      selectedEvent = NearbyEvent(
+        id: link.eventID,
+        title: link.title,
+        description: "",
+        category: link.category,
+        startTime: link.startTime,
+        endTime: link.endTime,
+        lat: link.coordinate.latitude,
+        lon: link.coordinate.longitude,
+        cap: nil,
+        commitCount: 0,
+        committedByMe: true,
+        checkedInByMe: false,
+        state: link.state,
+        bannerPath: nil,
+        // Deeplinks fire only for Events the user is Committed to, so:
+        // α — chat is open from creation; β — to reach this code path
+        // (an Event past its window in Recent) the Tip must already have
+        // fired (β auto-cancels at Tip-deadline if it hasn't). Either
+        // way, unlocked. Server is still the source of truth on Send.
+        chatUnlocked: true
+      )
+    }
+    nav.pendingDeeplink = nil
   }
 
   private func refetchForWindow() async {

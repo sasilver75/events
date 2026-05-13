@@ -12,6 +12,25 @@ struct MapView: UIViewRepresentable {
   var events: [NearbyEvent] = []
   var onSelect: (NearbyEvent) -> Void = { _ in }
   var centerBinding: Binding<CLLocationCoordinate2D>?
+  // FlyTo is the programmatic-recenter channel. Setting a new instance
+  // (identity-distinct UUID) on updateUIView triggers an animated setCenter;
+  // a stale instance (already-applied id) is ignored. Used by AppNavigation
+  // deeplinks where Your Events asks the Map to pan to a pin.
+  var flyTo: FlyTo?
+
+  struct FlyTo: Equatable {
+    let id: UUID
+    let coordinate: CLLocationCoordinate2D
+    let zoom: Double?
+
+    init(coordinate: CLLocationCoordinate2D, zoom: Double? = nil) {
+      self.id = UUID()
+      self.coordinate = coordinate
+      self.zoom = zoom
+    }
+
+    static func == (lhs: FlyTo, rhs: FlyTo) -> Bool { lhs.id == rhs.id }
+  }
 
   func makeCoordinator() -> Coordinator {
     Coordinator(onSelect: onSelect, centerBinding: centerBinding)
@@ -36,6 +55,10 @@ struct MapView: UIViewRepresentable {
     context.coordinator.onSelect = onSelect
     context.coordinator.centerBinding = centerBinding
     context.coordinator.sync(events: events, on: uiView)
+    if let flyTo, context.coordinator.lastFlyToID != flyTo.id {
+      context.coordinator.lastFlyToID = flyTo.id
+      uiView.setCenter(flyTo.coordinate, zoomLevel: flyTo.zoom ?? uiView.zoomLevel, animated: true)
+    }
   }
 
   // EventAnnotation carries the full Event payload alongside its coordinate
@@ -54,6 +77,7 @@ struct MapView: UIViewRepresentable {
   final class Coordinator: NSObject, MLNMapViewDelegate {
     var onSelect: (NearbyEvent) -> Void
     var centerBinding: Binding<CLLocationCoordinate2D>?
+    var lastFlyToID: UUID?
     private var byID: [String: EventAnnotation] = [:]
 
     init(

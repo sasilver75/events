@@ -18,6 +18,7 @@ import (
 
 	"github.com/sasilver75/events/server/internal/auth"
 	"github.com/sasilver75/events/server/internal/chat"
+	"github.com/sasilver75/events/server/internal/testsupport"
 )
 
 func TestStreamEndpoint(t *testing.T) {
@@ -47,6 +48,9 @@ func TestStreamEndpoint(t *testing.T) {
 	tokenA := signInWithPassword(t, supabaseURL, anonKey, testEmailA, testPasswordA)
 	tokenB := signInWithPassword(t, supabaseURL, anonKey, testEmailB, testPasswordB)
 	userA := userIDFromToken(t, supabaseURL, serviceKey, testEmailA)
+	userB := userIDFromToken(t, supabaseURL, serviceKey, testEmailB)
+	testsupport.EnsureProfile(t, pool, userA, "ChatTestA")
+	testsupport.EnsureProfile(t, pool, userB, "ChatTestB")
 
 	verifier, err := auth.NewVerifier(ctx, supabaseURL)
 	if err != nil {
