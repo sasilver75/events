@@ -240,11 +240,14 @@ func (w *SpurWorker) agentTurnConfig(cfg workflow.ServiceConfig) agent.TurnConfi
 		env["LINEAR_API_KEY"] = w.HarnessCreds.LinearToken
 	}
 	return agent.TurnConfig{
-		Command:      cfg.AgentCommand(),
-		TurnTimeout:  time.Duration(cfg.AgentTurnTimeoutMs()) * time.Millisecond,
-		StallTimeout: time.Duration(cfg.AgentStallTimeoutMs()) * time.Millisecond,
-		Env:          env,
-		DynamicTools: dynamicTools,
+		Command:           cfg.AgentCommand(),
+		TurnTimeout:       time.Duration(cfg.AgentTurnTimeoutMs()) * time.Millisecond,
+		StallTimeout:      time.Duration(cfg.AgentStallTimeoutMs()) * time.Millisecond,
+		Env:               env,
+		DynamicTools:      dynamicTools,
+		ApprovalPolicy:    cfg.AgentApprovalPolicy(),
+		ThreadSandbox:     cfg.AgentThreadSandbox(),
+		TurnSandboxPolicy: cfg.AgentTurnSandboxPolicy(),
 	}
 }
 

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -29,6 +30,15 @@ func TestNewServiceConfig_AppliesDefaults(t *testing.T) {
 	}
 	if cfg.Hooks.TimeoutMs != 60000 {
 		t.Errorf("Hooks.TimeoutMs default = %d", cfg.Hooks.TimeoutMs)
+	}
+	if cfg.AgentApprovalPolicy() != "never" {
+		t.Errorf("AgentApprovalPolicy default = %q", cfg.AgentApprovalPolicy())
+	}
+	if cfg.AgentThreadSandbox() != "danger-full-access" {
+		t.Errorf("AgentThreadSandbox default = %q", cfg.AgentThreadSandbox())
+	}
+	if got, want := cfg.AgentTurnSandboxPolicy(), map[string]any{"type": "dangerFullAccess"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("AgentTurnSandboxPolicy default = %#v, want %#v", got, want)
 	}
 }
 
@@ -67,8 +77,11 @@ func TestNewServiceConfig_OverridesFromFrontMatter(t *testing.T) {
 			"linear_access": "vm_env",
 		},
 		"codex": map[string]any{
-			"command":         "codex app-server --json",
-			"turn_timeout_ms": 1234,
+			"command":             "codex app-server --json",
+			"turn_timeout_ms":     1234,
+			"approval_policy":     "on-request",
+			"thread_sandbox":      "workspace-write",
+			"turn_sandbox_policy": map[string]any{"type": "workspaceWrite", "writableRoots": []any{"/Users/admin/events"}},
 		},
 	}
 	cfg := NewServiceConfig(raw)
@@ -121,8 +134,39 @@ func TestNewServiceConfig_OverridesFromFrontMatter(t *testing.T) {
 	if cfg.AgentTurnTimeoutMs() != 1234 {
 		t.Errorf("AgentTurnTimeoutMs = %d", cfg.AgentTurnTimeoutMs())
 	}
+	if cfg.AgentApprovalPolicy() != "on-request" {
+		t.Errorf("AgentApprovalPolicy = %q", cfg.AgentApprovalPolicy())
+	}
+	if cfg.AgentThreadSandbox() != "workspace-write" {
+		t.Errorf("AgentThreadSandbox = %q", cfg.AgentThreadSandbox())
+	}
+	wantSandboxPolicy := map[string]any{"type": "workspaceWrite", "writableRoots": []any{"/Users/admin/events"}}
+	if got := cfg.AgentTurnSandboxPolicy(); !reflect.DeepEqual(got, wantSandboxPolicy) {
+		t.Errorf("AgentTurnSandboxPolicy = %#v, want %#v", got, wantSandboxPolicy)
+	}
 	if cfg.LinearAccessMode() != "vm_env" {
 		t.Errorf("LinearAccessMode = %q", cfg.LinearAccessMode())
+	}
+}
+
+func TestNewServiceConfig_IgnoresInvalidCodexSandboxConfig(t *testing.T) {
+	t.Parallel()
+	cfg := NewServiceConfig(map[string]any{
+		"codex": map[string]any{
+			"approval_policy":     []any{"never"},
+			"thread_sandbox":      "",
+			"turn_sandbox_policy": "dangerFullAccess",
+		},
+	})
+
+	if cfg.AgentApprovalPolicy() != "never" {
+		t.Fatalf("AgentApprovalPolicy = %q, want default never", cfg.AgentApprovalPolicy())
+	}
+	if cfg.AgentThreadSandbox() != "danger-full-access" {
+		t.Fatalf("AgentThreadSandbox = %q, want default danger-full-access", cfg.AgentThreadSandbox())
+	}
+	if got, want := cfg.AgentTurnSandboxPolicy(), map[string]any{"type": "dangerFullAccess"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("AgentTurnSandboxPolicy = %#v, want %#v", got, want)
 	}
 }
 
@@ -331,5 +375,14 @@ func TestNewServiceConfig_RealWorkflowFile(t *testing.T) {
 	}
 	if cfg.Agent.MaxConcurrentAgentsByState["in progress"] != 1 {
 		t.Errorf("Agent.MaxConcurrentAgentsByState[in progress] = %d, want 1", cfg.Agent.MaxConcurrentAgentsByState["in progress"])
+	}
+	if cfg.AgentApprovalPolicy() != "never" {
+		t.Errorf("AgentApprovalPolicy = %q, want never", cfg.AgentApprovalPolicy())
+	}
+	if cfg.AgentThreadSandbox() != "danger-full-access" {
+		t.Errorf("AgentThreadSandbox = %q, want danger-full-access", cfg.AgentThreadSandbox())
+	}
+	if got, want := cfg.AgentTurnSandboxPolicy(), map[string]any{"type": "dangerFullAccess"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("AgentTurnSandboxPolicy = %#v, want %#v", got, want)
 	}
 }

@@ -77,6 +77,21 @@ fallback, but only when `tracker.api_key` is omitted. Explicit YAML values are
 authoritative: a literal token is used as-is, and a `$VAR` reference must be set
 in that exact environment variable.
 
+## Codex Trust Policy
+
+Spur configures Codex with a high-trust policy in `WORKFLOW.md`:
+`approval_policy: never`, `thread_sandbox: danger-full-access`, and
+`turn_sandbox_policy.type: dangerFullAccess`. The orchestrator treats these as
+Codex app-server pass-through settings and sends them on `thread/start`,
+`thread/resume`, and `turn/start`.
+
+This is intentional for AFK runs. Each issue runs inside its own Tart VM cloned
+from `spur-base`, and the VM is the security boundary. Codex can install tools,
+edit files, run local services, push branches, and create PRs without waiting
+for host-side approval prompts, while host-only secrets such as Linear remain
+outside the VM in `host_proxy` mode. The tradeoff is contained by the VM
+boundary: the agent has high trust inside the disposable guest, not on the host.
+
 ## End-of-Run Publication
 
 The publication contract lives in `WORKFLOW.md`, not the orchestrator. The
