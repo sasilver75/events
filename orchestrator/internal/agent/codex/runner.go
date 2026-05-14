@@ -32,6 +32,10 @@ type Runner struct {
 	WorkingDir   string
 	Env          map[string]string
 	DynamicTools []agent.DynamicTool
+
+	ApprovalPolicy    string
+	ThreadSandbox     string
+	TurnSandboxPolicy any
 }
 
 func (r *Runner) WithTurnConfig(cfg agent.TurnConfig) agent.Runner {
@@ -46,6 +50,15 @@ func (r *Runner) WithTurnConfig(cfg agent.TurnConfig) agent.Runner {
 		copy.Env[k] = v
 	}
 	copy.DynamicTools = append([]agent.DynamicTool(nil), cfg.DynamicTools...)
+	if cfg.ApprovalPolicy != "" {
+		copy.ApprovalPolicy = cfg.ApprovalPolicy
+	}
+	if cfg.ThreadSandbox != "" {
+		copy.ThreadSandbox = cfg.ThreadSandbox
+	}
+	if cfg.TurnSandboxPolicy != nil {
+		copy.TurnSandboxPolicy = cfg.TurnSandboxPolicy
+	}
 	return &copy
 }
 
@@ -135,9 +148,9 @@ func (r *Runner) runProtocol(ctx context.Context, protocol *protocolClient, prom
 	var threadID string
 	var err error
 	if resume != "" {
-		threadID, err = protocol.threadResume(ctx, resume, r.WorkingDir)
+		threadID, err = protocol.threadResume(ctx, resume, r.WorkingDir, r.approvalPolicy(), r.threadSandbox())
 	} else {
-		threadID, err = protocol.threadStart(ctx, r.WorkingDir)
+		threadID, err = protocol.threadStart(ctx, r.WorkingDir, r.approvalPolicy(), r.threadSandbox())
 	}
 	if err != nil {
 		return threadID, agent.RunResult{Type: agent.EventStartupFailed, SessionID: threadID}, err
@@ -151,7 +164,7 @@ func (r *Runner) runProtocol(ctx context.Context, protocol *protocolClient, prom
 		})
 	}
 
-	turnID, err := protocol.turnStart(ctx, threadID, prompt, r.WorkingDir)
+	turnID, err := protocol.turnStart(ctx, threadID, prompt, r.WorkingDir, r.approvalPolicy(), r.turnSandboxPolicy())
 	if err != nil {
 		return threadID, agent.RunResult{Type: agent.EventTurnFailed, SessionID: threadID}, err
 	}
@@ -170,6 +183,27 @@ func (r *Runner) buildCommand() string {
 	}
 	return fmt.Sprintf(`eval "$(/opt/homebrew/bin/brew shellenv)" && %scd %s && %s`,
 		envPrefix, shellQuote(r.WorkingDir), r.Command)
+}
+
+func (r *Runner) approvalPolicy() string {
+	if r.ApprovalPolicy == "" {
+		return "never"
+	}
+	return r.ApprovalPolicy
+}
+
+func (r *Runner) threadSandbox() string {
+	if r.ThreadSandbox == "" {
+		return "danger-full-access"
+	}
+	return r.ThreadSandbox
+}
+
+func (r *Runner) turnSandboxPolicy() any {
+	if r.TurnSandboxPolicy == nil {
+		return map[string]any{"type": "dangerFullAccess"}
+	}
+	return r.TurnSandboxPolicy
 }
 
 func shellQuote(s string) string {
@@ -291,11 +325,11 @@ func (c *protocolClient) requestRaw(ctx context.Context, method string, params a
 	}
 }
 
-func (c *protocolClient) threadStart(ctx context.Context, cwd string) (string, error) {
+func (c *protocolClient) threadStart(ctx context.Context, cwd, approvalPolicy, sandbox string) (string, error) {
 	params := map[string]any{
-		"approvalPolicy": "never",
+		"approvalPolicy": approvalPolicy,
 		"cwd":            cwd,
-		"sandbox":        "danger-full-access",
+		"sandbox":        sandbox,
 	}
 	if len(c.dynamicTools) > 0 {
 		params["dynamicTools"] = dynamicToolSpecs(c.dynamicTools)
@@ -307,11 +341,11 @@ func (c *protocolClient) threadStart(ctx context.Context, cwd string) (string, e
 	return extractThreadID(result)
 }
 
-func (c *protocolClient) threadResume(ctx context.Context, threadID, cwd string) (string, error) {
+func (c *protocolClient) threadResume(ctx context.Context, threadID, cwd, approvalPolicy, sandbox string) (string, error) {
 	params := map[string]any{
-		"approvalPolicy": "never",
+		"approvalPolicy": approvalPolicy,
 		"cwd":            cwd,
-		"sandbox":        "danger-full-access",
+		"sandbox":        sandbox,
 		"threadId":       threadID,
 	}
 	if len(c.dynamicTools) > 0 {
@@ -327,14 +361,12 @@ func (c *protocolClient) threadResume(ctx context.Context, threadID, cwd string)
 	return threadID, nil
 }
 
-func (c *protocolClient) turnStart(ctx context.Context, threadID, prompt, cwd string) (string, error) {
+func (c *protocolClient) turnStart(ctx context.Context, threadID, prompt, cwd, approvalPolicy string, sandboxPolicy any) (string, error) {
 	result, err := c.requestRaw(ctx, "turn/start", map[string]any{
 		"threadId":       threadID,
 		"cwd":            cwd,
-		"approvalPolicy": "never",
-		"sandboxPolicy": map[string]any{
-			"type": "dangerFullAccess",
-		},
+		"approvalPolicy": approvalPolicy,
+		"sandboxPolicy":  sandboxPolicy,
 		"input": []map[string]string{
 			{
 				"type": "text",

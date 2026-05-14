@@ -312,6 +312,57 @@ func TestRunProtocolResumeAdvertisesDynamicTools(t *testing.T) {
 	}
 }
 
+func TestRunProtocolUsesConfiguredApprovalAndSandbox(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		resume       string
+		threadMethod string
+	}{
+		{name: "start", threadMethod: "thread/start"},
+		{name: "resume", resume: "thread-123", threadMethod: "thread/resume"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			serverIn, clientIn := io.Pipe()
+			clientOut, serverOut := io.Pipe()
+			defer func() { _ = serverIn.Close() }()
+			defer func() { _ = clientIn.Close() }()
+			defer func() { _ = clientOut.Close() }()
+			defer func() { _ = serverOut.Close() }()
+
+			errs := make(chan error, 1)
+			go func() {
+				dec := json.NewDecoder(serverIn)
+				enc := json.NewEncoder(serverOut)
+				errs <- runFakeRuntimeConfigAppServer(dec, enc, tc.threadMethod)
+			}()
+
+			protocol := newProtocolClient(clientIn, clientOut, nil)
+			r := &Runner{
+				WorkingDir:        "/Users/admin/events",
+				ApprovalPolicy:    "on-request",
+				ThreadSandbox:     "workspace-write",
+				TurnSandboxPolicy: map[string]any{"type": "workspaceWrite", "writableRoots": []any{"/Users/admin/events"}},
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			threadID, result, err := r.runProtocol(ctx, protocol, "Do the work", tc.resume, time.Now(), nil)
+			if err != nil {
+				t.Fatalf("runProtocol: %v", err)
+			}
+			if serverErr := <-errs; serverErr != nil {
+				t.Fatalf("fake app-server: %v", serverErr)
+			}
+			if threadID != "thread-123" || result.Type != agent.EventTurnCompleted {
+				t.Fatalf("threadID/result = %q/%q", threadID, result.Type)
+			}
+		})
+	}
+}
+
 func runFakeAppServer(dec *json.Decoder, enc *json.Encoder) error {
 	initReq, err := readFakeRequest(dec, "initialize")
 	if err != nil {
@@ -331,6 +382,9 @@ func runFakeAppServer(dec *json.Decoder, enc *json.Encoder) error {
 	if !requestHasDynamicTool(threadReq, "linear_graphql") {
 		return &fakeServerError{"thread/start missing linear_graphql dynamic tool"}
 	}
+	if err := assertThreadRuntimeParams(threadReq, "never", "danger-full-access"); err != nil {
+		return err
+	}
 	if err := enc.Encode(map[string]any{
 		"id": threadReq.ID,
 		"result": map[string]any{
@@ -346,6 +400,9 @@ func runFakeAppServer(dec *json.Decoder, enc *json.Encoder) error {
 	}
 	if got := gjsonString(turnReq.Params, "threadId"); got != "thread-123" {
 		return &fakeServerError{"turn/start threadId = " + got}
+	}
+	if err := assertTurnRuntimeParams(turnReq, "never", "dangerFullAccess"); err != nil {
+		return err
 	}
 	if err := enc.Encode(map[string]any{
 		"id": turnReq.ID,
@@ -440,6 +497,9 @@ func runFakeResumeAppServer(dec *json.Decoder, enc *json.Encoder) error {
 	if !requestHasDynamicTool(threadReq, "linear_graphql") {
 		return &fakeServerError{"thread/resume missing linear_graphql dynamic tool"}
 	}
+	if err := assertThreadRuntimeParams(threadReq, "never", "danger-full-access"); err != nil {
+		return err
+	}
 	if err := enc.Encode(map[string]any{
 		"id": threadReq.ID,
 		"result": map[string]any{
@@ -455,6 +515,9 @@ func runFakeResumeAppServer(dec *json.Decoder, enc *json.Encoder) error {
 	}
 	if got := gjsonString(turnReq.Params, "threadId"); got != "thread-123" {
 		return &fakeServerError{"turn/start threadId = " + got}
+	}
+	if err := assertTurnRuntimeParams(turnReq, "never", "dangerFullAccess"); err != nil {
+		return err
 	}
 	if err := enc.Encode(map[string]any{
 		"id": turnReq.ID,
@@ -475,6 +538,105 @@ func runFakeResumeAppServer(dec *json.Decoder, enc *json.Encoder) error {
 			},
 		},
 	})
+}
+
+func runFakeRuntimeConfigAppServer(dec *json.Decoder, enc *json.Encoder, threadMethod string) error {
+	initReq, err := readFakeRequest(dec, "initialize")
+	if err != nil {
+		return err
+	}
+	if err := enc.Encode(map[string]any{
+		"id":     initReq.ID,
+		"result": map[string]any{"userAgent": "fake-codex"},
+	}); err != nil {
+		return err
+	}
+
+	threadReq, err := readFakeRequest(dec, threadMethod)
+	if err != nil {
+		return err
+	}
+	if threadMethod == "thread/resume" {
+		if got := gjsonString(threadReq.Params, "threadId"); got != "thread-123" {
+			return &fakeServerError{"thread/resume threadId = " + got}
+		}
+	}
+	if err := assertThreadRuntimeParams(threadReq, "on-request", "workspace-write"); err != nil {
+		return err
+	}
+	if err := enc.Encode(map[string]any{
+		"id": threadReq.ID,
+		"result": map[string]any{
+			"thread": map[string]any{"id": "thread-123"},
+		},
+	}); err != nil {
+		return err
+	}
+
+	turnReq, err := readFakeRequest(dec, "turn/start")
+	if err != nil {
+		return err
+	}
+	if got := gjsonString(turnReq.Params, "threadId"); got != "thread-123" {
+		return &fakeServerError{"turn/start threadId = " + got}
+	}
+	if err := assertTurnRuntimeParams(turnReq, "on-request", "workspaceWrite"); err != nil {
+		return err
+	}
+	if got := sandboxPolicyWritableRoot(turnReq.Params); got != "/Users/admin/events" {
+		return &fakeServerError{"turn/start sandboxPolicy.writableRoots[0] = " + got}
+	}
+	if err := enc.Encode(map[string]any{
+		"id": turnReq.ID,
+		"result": map[string]any{
+			"turn": map[string]any{"id": "turn-custom"},
+		},
+	}); err != nil {
+		return err
+	}
+	return enc.Encode(map[string]any{
+		"method": "turn/completed",
+		"params": map[string]any{
+			"threadId": "thread-123",
+			"turn": map[string]any{
+				"id":     "turn-custom",
+				"status": "completed",
+				"items":  []any{},
+			},
+		},
+	})
+}
+
+func assertThreadRuntimeParams(req rpcMessage, approvalPolicy, sandbox string) error {
+	if got := gjsonString(req.Params, "approvalPolicy"); got != approvalPolicy {
+		return &fakeServerError{req.Method + " approvalPolicy = " + got}
+	}
+	if got := gjsonString(req.Params, "sandbox"); got != sandbox {
+		return &fakeServerError{req.Method + " sandbox = " + got}
+	}
+	return nil
+}
+
+func assertTurnRuntimeParams(req rpcMessage, approvalPolicy, sandboxPolicyType string) error {
+	if got := gjsonString(req.Params, "approvalPolicy"); got != approvalPolicy {
+		return &fakeServerError{req.Method + " approvalPolicy = " + got}
+	}
+	if got := gjsonString(req.Params, "sandboxPolicy.type"); got != sandboxPolicyType {
+		return &fakeServerError{req.Method + " sandboxPolicy.type = " + got}
+	}
+	return nil
+}
+
+func sandboxPolicyWritableRoot(raw json.RawMessage) string {
+	var params struct {
+		SandboxPolicy struct {
+			WritableRoots []string `json:"writableRoots"`
+		} `json:"sandboxPolicy"`
+	}
+	if err := json.Unmarshal(raw, &params); err != nil || len(params.SandboxPolicy.WritableRoots) == 0 {
+		return ""
+	}
+	return params.SandboxPolicy.WritableRoots[0]
 }
 
 func readFakeRequest(dec *json.Decoder, method string) (rpcMessage, error) {

@@ -114,11 +114,14 @@ type RunResult struct {
 // and host-held credentials. Concrete runners may ignore fields they do not
 // support, but should never mutate the supplied map.
 type TurnConfig struct {
-	Command      string
-	TurnTimeout  time.Duration
-	StallTimeout time.Duration
-	Env          map[string]string
-	DynamicTools []DynamicTool
+	Command           string
+	TurnTimeout       time.Duration
+	StallTimeout      time.Duration
+	Env               map[string]string
+	DynamicTools      []DynamicTool
+	ApprovalPolicy    string
+	ThreadSandbox     string
+	TurnSandboxPolicy any
 }
 
 // Runner launches one coding-agent turn inside the issue workspace.

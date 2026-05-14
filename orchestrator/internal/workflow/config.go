@@ -77,10 +77,13 @@ type CredentialsConfig struct {
 
 // CodexConfig is the typed view of Symphony's reference `codex` section.
 type CodexConfig struct {
-	Command        string
-	TurnTimeoutMs  int
-	ReadTimeoutMs  int
-	StallTimeoutMs int
+	Command           string
+	TurnTimeoutMs     int
+	ReadTimeoutMs     int
+	StallTimeoutMs    int
+	ApprovalPolicy    string
+	ThreadSandbox     string
+	TurnSandboxPolicy any
 }
 
 // Validation error categories. Symphony spec §6.3.
@@ -117,10 +120,13 @@ func NewServiceConfig(raw map[string]any) ServiceConfig {
 		},
 		Credentials: CredentialsConfig{LinearAccess: "host_proxy"},
 		Codex: CodexConfig{
-			Command:        "codex app-server",
-			TurnTimeoutMs:  3600000,
-			ReadTimeoutMs:  5000,
-			StallTimeoutMs: 300000,
+			Command:           "codex app-server",
+			TurnTimeoutMs:     3600000,
+			ReadTimeoutMs:     5000,
+			StallTimeoutMs:    300000,
+			ApprovalPolicy:    "never",
+			ThreadSandbox:     "danger-full-access",
+			TurnSandboxPolicy: map[string]any{"type": "dangerFullAccess"},
 		},
 	}
 
@@ -205,6 +211,15 @@ func NewServiceConfig(raw map[string]any) ServiceConfig {
 		if v := intField(c, "stall_timeout_ms"); v > 0 {
 			cfg.Codex.StallTimeoutMs = v
 		}
+		if v := stringField(c, "approval_policy"); v != "" {
+			cfg.Codex.ApprovalPolicy = v
+		}
+		if v := stringField(c, "thread_sandbox"); v != "" {
+			cfg.Codex.ThreadSandbox = v
+		}
+		if v := objectField(c, "turn_sandbox_policy"); v != nil {
+			cfg.Codex.TurnSandboxPolicy = v
+		}
 	}
 
 	return cfg
@@ -274,6 +289,27 @@ func (c ServiceConfig) AgentTurnTimeoutMs() int {
 
 func (c ServiceConfig) AgentStallTimeoutMs() int {
 	return c.Codex.StallTimeoutMs
+}
+
+func (c ServiceConfig) AgentApprovalPolicy() string {
+	if c.Codex.ApprovalPolicy == "" {
+		return "never"
+	}
+	return c.Codex.ApprovalPolicy
+}
+
+func (c ServiceConfig) AgentThreadSandbox() string {
+	if c.Codex.ThreadSandbox == "" {
+		return "danger-full-access"
+	}
+	return c.Codex.ThreadSandbox
+}
+
+func (c ServiceConfig) AgentTurnSandboxPolicy() any {
+	if c.Codex.TurnSandboxPolicy == nil {
+		return map[string]any{"type": "dangerFullAccess"}
+	}
+	return cloneConfigValue(c.Codex.TurnSandboxPolicy)
 }
 
 func (c ServiceConfig) AgentRunnerName() string {
@@ -377,6 +413,34 @@ func intValue(raw any) int {
 		return n
 	}
 	return 0
+}
+
+func objectField(m map[string]any, key string) map[string]any {
+	v, ok := m[key].(map[string]any)
+	if !ok || len(v) == 0 {
+		return nil
+	}
+	cloned, _ := cloneConfigValue(v).(map[string]any)
+	return cloned
+}
+
+func cloneConfigValue(v any) any {
+	switch typed := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for k, child := range typed {
+			out[k] = cloneConfigValue(child)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i, child := range typed {
+			out[i] = cloneConfigValue(child)
+		}
+		return out
+	default:
+		return typed
+	}
 }
 
 // parseAPIKeyRef splits the tracker api_key into its literal or env-reference

@@ -203,6 +203,21 @@ func TestSpurWorkerAgentTurnConfigCredentialModes(t *testing.T) {
 	if len(hostProxyTurn.DynamicTools) != 1 || hostProxyTurn.DynamicTools[0].Name != "linear_graphql" {
 		t.Fatalf("host_proxy dynamic tools = %+v", hostProxyTurn.DynamicTools)
 	}
+
+	customCfg := validConfig()
+	customCfg.Codex.ApprovalPolicy = "on-request"
+	customCfg.Codex.ThreadSandbox = "workspace-write"
+	customCfg.Codex.TurnSandboxPolicy = map[string]any{"type": "workspaceWrite"}
+	customTurn := w.agentTurnConfig(customCfg)
+	if customTurn.ApprovalPolicy != "on-request" {
+		t.Fatalf("ApprovalPolicy = %q", customTurn.ApprovalPolicy)
+	}
+	if customTurn.ThreadSandbox != "workspace-write" {
+		t.Fatalf("ThreadSandbox = %q", customTurn.ThreadSandbox)
+	}
+	if got := customTurn.TurnSandboxPolicy.(map[string]any)["type"]; got != "workspaceWrite" {
+		t.Fatalf("TurnSandboxPolicy type = %v", got)
+	}
 }
 
 func TestRunOnce_DispatchesSingleIssue(t *testing.T) {

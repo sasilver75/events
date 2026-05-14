@@ -137,6 +137,13 @@ codex:
   turn_timeout_ms: 3600000
   read_timeout_ms: 5000
   stall_timeout_ms: 600000
+  # High-trust Codex policy is safe here because each run happens inside an
+  # isolated, disposable Tart VM. These values are passed through to Codex
+  # app-server thread/start, thread/resume, and turn/start requests.
+  approval_policy: never
+  thread_sandbox: danger-full-access
+  turn_sandbox_policy:
+    type: dangerFullAccess
 ---
 
 # Spur agent task: {{ issue.identifier }}
