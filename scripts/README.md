@@ -23,6 +23,15 @@ Bypass with `git push --no-verify` when you know what you're doing.
 
 `spur-agent` dispatches one Linear issue through the default production runner.
 
+`spur-dashboard` serves a local read-only dashboard for harness status
+snapshots. With no arguments it aggregates `/tmp/spur-orchestrator/*.json`;
+pass a file to follow one daemon snapshot:
+
+```sh
+scripts/spur-dashboard
+scripts/spur-dashboard /tmp/spur-orchestrator/status.json
+```
+
 `spur-store-harness-secret` stores Linear/GitHub harness tokens through a
 silent prompt, avoiding shell history. It defaults to macOS Keychain and also
 supports a chmod-600 `~/.spur/env` fallback with `--env-file`.

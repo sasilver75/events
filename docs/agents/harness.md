@@ -42,11 +42,11 @@ Implemented:
 - Polling orchestrator state machine with bounded dispatch, retries, continuation resume, cancellation, terminal cleanup, and `agent.max_turns`.
 - Dynamic `WORKFLOW.md` reload for prompt text, hooks, limits, active/terminal states, and Codex command/timeout settings.
 - Optional JSON status snapshots via `--status-file`, including running/retrying/needs-human work, recent runs, Codex token totals, and rate-limit telemetry.
+- Local read-only dashboard via `scripts/spur-dashboard`, backed by daemon snapshots or an aggregate directory of one-shot snapshots.
 - Successful-continuation loop guard that records `needs_human`, posts an escalation comment, and moves the Linear issue to `Needs Human`.
 
 Not implemented:
 
-- Dedicated dashboard. Current operator visibility is structured logs plus optional JSON snapshots.
 - Full stall detection based on last Codex event timestamp. This remains a conformance/hardening item.
 - General-purpose host-side Linear mutations. Normal comments/state changes are still performed by the agent per `WORKFLOW.md`.
 
@@ -100,6 +100,37 @@ agent is responsible for:
 1. Creating a PR against `main` with the Linear issue identifier in the title.
 2. Posting a Linear closeout comment with PR link, AC table, drift list, and test evidence.
 3. Moving the issue from `In Progress` to `In Review`.
+
+## Operator Dashboard
+
+The dashboard is intentionally a thin read-only layer over orchestrator status
+snapshots. It does not claim work, cancel runs, mutate Linear, or become a
+second state store.
+
+Run the orchestrator with a status file:
+
+```sh
+go run ./cmd/spur-orchestrator --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/status.json
+```
+
+Then serve the dashboard from the repo root:
+
+```sh
+scripts/spur-dashboard /tmp/spur-orchestrator/status.json
+```
+
+For dogfooding with supervised one-shot runs, omit the file argument or pass the
+directory:
+
+```sh
+scripts/spur-dashboard /tmp/spur-orchestrator
+```
+
+Directory mode aggregates every `*.json` snapshot in that directory, annotates
+rows with the source file, and lets the operator click a row for per-agent/run
+details. The UI shows active runs, session/thread/turn IDs, last Codex
+event/message, retry backoff, needs-human escalations, recent runs, token
+totals, rate-limit telemetry, and active workflow metadata.
 
 ## Scope
 
