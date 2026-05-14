@@ -59,7 +59,7 @@ type Credentials struct {
 // Run executes one full ticket lifecycle and returns a WorkerResult.
 // Errors are captured in the result, not returned, so the orchestrator
 // can always integrate the outcome into its state machine.
-func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, resumeSessionID string) WorkerResult {
+func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, resumeSessionID string, onEvent func(agent.Event)) WorkerResult {
 	def, cfg := w.workflowSnapshot()
 	logger := w.Logger.With("issue", issue.Identifier)
 	logger.Info("worker starting", "title", issue.Title, "state", issue.State)
@@ -122,6 +122,9 @@ func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, 
 	agentRunner := w.AgentRunner.WithTurnConfig(w.agentTurnConfig(cfg))
 	logger.Info("launching agent")
 	agentResult, runErr := agentRunner.Run(ctx, vmIP, prompt, resumeSessionID, func(ev agent.Event) {
+		if onEvent != nil {
+			onEvent(ev)
+		}
 		// Lightweight live logging; high-volume fan-out goes to a log
 		// sink in a real deployment.
 		if ev.Type == agent.EventSessionStarted {
