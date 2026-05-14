@@ -353,6 +353,35 @@ func TestServiceConfig_ValidateRequiresResolvedTrackerAPIKey(t *testing.T) {
 	}
 }
 
+func TestServiceConfig_ValidateWithoutTrackerAPIKeyAllowsOfflineValidation(t *testing.T) {
+	t.Setenv("SPUR_TEST_LINEAR_KEY", "")
+	t.Setenv("LINEAR_API_KEY", "")
+	cfg := ServiceConfig{
+		Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur", APIKeyEnv: "SPUR_TEST_LINEAR_KEY"},
+		Agent:   AgentConfig{Runner: "codex"},
+		Codex:   CodexConfig{Command: "codex app-server"},
+	}
+
+	if err := cfg.ValidateWithoutTrackerAPIKey(); err != nil {
+		t.Fatalf("ValidateWithoutTrackerAPIKey() = %v", err)
+	}
+	if err := cfg.Validate(); !errors.Is(err, ErrMissingTrackerAPIKey) {
+		t.Fatalf("Validate() = %v, want ErrMissingTrackerAPIKey", err)
+	}
+}
+
+func TestServiceConfig_ValidateWithoutTrackerAPIKeyStillValidatesStructure(t *testing.T) {
+	cfg := ServiceConfig{
+		Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
+		Agent:   AgentConfig{Runner: "codex"},
+	}
+
+	err := cfg.ValidateWithoutTrackerAPIKey()
+	if !errors.Is(err, ErrMissingCodexCommand) {
+		t.Fatalf("ValidateWithoutTrackerAPIKey() = %v, want ErrMissingCodexCommand", err)
+	}
+}
+
 func TestServiceConfig_ValidateUsesTrackerAPIKeyEnvFallback(t *testing.T) {
 	t.Setenv("LINEAR_API_KEY", "lin_test")
 	cfg := ServiceConfig{

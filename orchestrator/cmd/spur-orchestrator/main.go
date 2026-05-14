@@ -22,8 +22,9 @@
 //	                               → print the evidence checklist for deciding
 //	                                 whether a Codex run succeeded
 //	spur-orchestrator --codex-canary-verify-status --issue SAM-12 --status-file /tmp/spur-orchestrator/SAM-12-codex.json
-//	                               → validate machine-readable status evidence
-//	                                 from a Codex run
+//	                               → validate local machine-readable status
+//	                                 evidence from a Codex run without Linear
+//	                                 credentials
 //	spur-orchestrator --status-file /tmp/spur-orchestrator/status.json
 //	                               → daemon mode with JSON status snapshots
 //	spur-orchestrator --codex-smoke → check configured Codex app-server protocol
@@ -76,7 +77,7 @@ func main() {
 		codexSmoke           = flag.Bool("codex-smoke", false, "Start configured codex app-server, initialize it, and exit")
 		codexCanary          = flag.Bool("codex-canary", false, "Deprecated no-op; Codex is the production runner")
 		codexCanaryChecklist = flag.Bool("codex-canary-checklist", false, "Print the post-run evidence checklist for a Codex run and exit")
-		codexCanaryVerify    = flag.Bool("codex-canary-verify-status", false, "Validate a Codex status JSON proof file and exit")
+		codexCanaryVerify    = flag.Bool("codex-canary-verify-status", false, "Validate a local Codex status JSON proof file without contacting Linear, then exit")
 		preflight            = flag.Bool("preflight", false, "Validate credentials, tracker access, target issue eligibility, and Codex handshake without dispatching")
 		statusFile           = flag.String("status-file", "", "Optional path for runtime JSON status snapshots, or status verifier input")
 		verbose              = flag.Bool("verbose", false, "Log at debug level")
@@ -99,7 +100,7 @@ func main() {
 	if err := applyCLIConfigOverrides(&cfg, *codexCanary, *once, *preflight, *issue); err != nil {
 		fatal(logger, "invalid CLI override", "err", err)
 	}
-	if err := cfg.Validate(); err != nil {
+	if err := validateWorkflowConfigForMode(cfg, *codexCanaryVerify); err != nil {
 		fatal(logger, "workflow validation failed", "err", err)
 	}
 	if *codexCanaryChecklist {
@@ -271,6 +272,13 @@ func applyCLIConfigOverrides(cfg *workflow.ServiceConfig, codexCanary, once, pre
 	cfg.Agent.Runner = "codex"
 	cfg.Credentials.LinearAccess = "host_proxy"
 	return nil
+}
+
+func validateWorkflowConfigForMode(cfg workflow.ServiceConfig, offlineStatusVerification bool) error {
+	if offlineStatusVerification {
+		return cfg.ValidateWithoutTrackerAPIKey()
+	}
+	return cfg.Validate()
 }
 
 func validatePreflightCredentials(githubToken string) error {
