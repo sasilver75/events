@@ -263,6 +263,35 @@
     height: auto;
   }
 
+  .mermaid-panel {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 4px 16px rgba(30, 28, 24, 0.05);
+    overflow: auto;
+  }
+  .mermaid {
+    margin: 0;
+    min-height: 300px;
+    display: grid;
+    place-items: center;
+    color: var(--ink);
+    font-family: var(--sans);
+  }
+  .mermaid svg {
+    width: 100%;
+    max-width: 100%;
+    max-height: 430px;
+    height: auto;
+  }
+  .mermaid-note {
+    margin-top: 10px;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
   .node {
     fill: #ffffff;
     stroke: #bdb7ac;
@@ -668,26 +697,26 @@
         </div>
         <div class="source">Reference shape: OpenAI Symphony SPEC.md. Spur adaptation: repo-owned <code>WORKFLOW.md</code>, Go orchestrator, Tart macOS VMs, Codex runner.</div>
       </div>
-      <div class="footer-note"><span>Use left/right arrows, space, or the buttons below.</span><span>Goal: operator mental model, not API reference.</span></div>
+      <div class="footer-note"><span>Use left/right arrows, space, or the buttons below.</span><span>Goal: system overview for engineers, not API reference.</span></div>
     </section>
 
     <section class="slide" data-title="Reading Path">
       <div>
         <div class="kicker">How to read this deck</div>
-        <h2>Build the model in layers: purpose, boundaries, flow, then proof.</h2>
+        <h2>Read the deck in layers: purpose, boundaries, flow, then evidence.</h2>
         <p class="lede">The system is easier to understand if you do not start with code packages. Start with the jobs each boundary performs, then zoom into the run loop and agent protocol.</p>
       </div>
       <div class="content top">
         <div class="toc-grid">
-          <div class="toc-item bg-blue"><div class="num">01</div><h3>Purpose</h3><p>Why a normal local prompt or Linux container is not enough for unattended iOS work.</p></div>
+          <div class="toc-item bg-blue"><div class="num">01</div><h3>Purpose</h3><p>Why unattended iOS work needs macOS isolation, tracker policy, and explicit handoff.</p></div>
           <div class="toc-item bg-green"><div class="num">02</div><h3>Control plane</h3><p>How Linear, eligibility policy, and issue states decide what may run.</p></div>
           <div class="toc-item bg-yellow"><div class="num">03</div><h3>Execution plane</h3><p>How the orchestrator creates a Tart VM, runs hooks, and launches Codex.</p></div>
           <div class="toc-item bg-violet"><div class="num">04</div><h3>Agent plane</h3><p>How the Codex app-server runner handles sessions, turns, dynamic tools, and telemetry.</p></div>
-          <div class="toc-item bg-teal"><div class="num">05</div><h3>Evidence plane</h3><p>Where logs, JSON status, PRs, Linear comments, and canary artifacts prove what happened.</p></div>
+          <div class="toc-item bg-teal"><div class="num">05</div><h3>Evidence plane</h3><p>Where logs, JSON status, PRs, Linear comments, and canary artifacts record what happened.</p></div>
           <div class="toc-item bg-red"><div class="num">06</div><h3>Failure paths</h3><p>How retries, cancellation, terminal cleanup, and Needs Human escalation keep failures bounded.</p></div>
         </div>
         <div class="callout">
-          <p><strong>Key intuition:</strong> the orchestrator is not a smarter agent. It is the control shell around the agent: policy in, isolated work out, evidence back.</p>
+          <p><strong>Boundary rule:</strong> the orchestrator is the control process around the agent. It applies policy, creates isolated work, and records evidence; it does not decide how to implement the issue.</p>
         </div>
       </div>
     </section>
@@ -707,17 +736,17 @@
           </div>
           <div class="panel bg-green">
             <div class="label">Scheduler</div>
-            <h3>Go orchestrator is the authority</h3>
+            <h3>Go orchestrator owns scheduling</h3>
             <p>It polls Linear, claims eligible issues, starts bounded workers, retries or continues turns, and cancels work that stops being eligible.</p>
           </div>
           <div class="panel bg-yellow">
             <div class="label">Workspace</div>
-            <h3>Tart gives each issue a Mac</h3>
+            <h3>Tart creates one macOS VM per issue</h3>
             <p>The workspace is a per-issue macOS VM clone, not a directory or Docker container. This is what makes iOS work possible.</p>
           </div>
           <div class="panel bg-violet">
             <div class="label">Runner</div>
-            <h3>Codex app-server does the turn</h3>
+            <h3>Codex app-server runs the agent turn</h3>
             <p>Codex receives the rendered issue prompt, talks through the app-server protocol, and can use host-proxied tools such as Linear GraphQL.</p>
           </div>
         </div>
@@ -730,11 +759,11 @@
     <section class="slide" data-title="Why Exists">
       <div>
         <div class="kicker">Why this exists</div>
-        <h2>Spur needs a coding-agent service that can really run iOS work.</h2>
-        <p class="lede">A normal Linux sandbox is not enough. The harness must support Xcode, the iOS Simulator, codesign, Supabase, Docker/Colima, Go, GitHub PRs, and Linear handoff.</p>
+        <h2>Spur needs a coding-agent service that runs inside an iOS-capable macOS environment.</h2>
+        <p class="lede">The harness must support Xcode, the iOS Simulator, codesign, Supabase, Docker/Colima, Go, GitHub PRs, and Linear handoff. A Linux-only sandbox cannot provide that environment.</p>
       </div>
       <div class="content">
-        <div class="grid.sidebar">
+        <div class="grid sidebar">
           <div class="panel">
             <div class="label">The failure mode without a harness</div>
             <ul class="bullets">
@@ -742,7 +771,7 @@
               <li>Tooling state leaks between tasks.</li>
               <li>Credentials are copied ad hoc.</li>
               <li>Finished code may never get a PR or Linear closeout.</li>
-              <li>Long-running attempts are hard to observe.</li>
+              <li>Long-running attempts do not leave consistent status or artifact records.</li>
             </ul>
           </div>
           <div class="diagram">
@@ -794,7 +823,7 @@
         <p class="lede">The spec describes a tracker-driven service that creates isolated workspaces and runs coding agents from repo-owned workflow policy. Spur keeps that shape but swaps filesystem workspaces for macOS VMs.</p>
       </div>
       <div class="content">
-        <div class="grid.two">
+        <div class="grid two">
           <div class="panel">
             <div class="split-title">
               <h3>Reference Symphony</h3>
@@ -819,7 +848,7 @@
               <tr><td>Tracker</td><td>Linear project <code>Spur</code> with AFK/HITL policy.</td></tr>
               <tr><td>Workspace</td><td>Per-issue Tart macOS VM clone.</td></tr>
               <tr><td>Workflow</td><td>Same repo-owned contract, with hooks and Spur policy.</td></tr>
-              <tr><td>Runner</td><td>Codex app-server runner exists and was canary-proven.</td></tr>
+              <tr><td>Runner</td><td>Codex app-server runner exists and has been verified by a canary run.</td></tr>
               <tr><td>Tracker writes</td><td>Agent owns normal handoff; orchestrator only has narrow escalation writes.</td></tr>
             </table>
           </div>
@@ -830,12 +859,12 @@
 
     <section class="slide" data-title="Planes">
       <div>
-        <div class="kicker">Mental model</div>
-        <h2>Think in planes: policy, control, execution, agent, evidence.</h2>
-        <p class="lede">Most confusion comes from mixing these together. The system is deliberately split so each plane can evolve without taking over the others.</p>
+        <div class="kicker">System boundaries</div>
+        <h2>The harness separates policy, control, execution, agent work, and evidence.</h2>
+        <p class="lede">Each boundary has a different owner and failure mode. Keeping them separate makes it easier to diagnose whether a problem came from tracker policy, VM execution, agent behavior, or evidence collection.</p>
       </div>
       <div class="content">
-        <div class="grid.four">
+        <div class="grid four">
           <div class="panel bg-teal">
             <div class="label">Policy plane</div>
             <h3><code>WORKFLOW.md</code></h3>
@@ -857,15 +886,15 @@
             <p>Codex receives a rendered prompt, works inside the VM, calls dynamic tools, and emits protocol telemetry.</p>
           </div>
         </div>
-        <div class="grid.two">
+        <div class="grid two">
           <div class="panel bg-green">
             <div class="label">Evidence plane</div>
             <h3>PR, comments, logs, JSON</h3>
-            <p>GitHub PRs, Linear pickup/closeout comments, copied logs, status snapshots, and canary proof files are the audit trail.</p>
+            <p>GitHub PRs, Linear pickup/closeout comments, copied logs, status snapshots, and canary artifacts are the audit trail.</p>
           </div>
           <div class="panel">
             <div class="label">Debugging rule</div>
-            <p>When something fails, first ask which plane failed. A bad issue label is not a Codex bug. A missing PR is not a Tart bug. A missing status file is not a Linear bug.</p>
+            <p>When something fails, first identify the plane that failed. A label mismatch points to tracker policy, a missing PR points to agent handoff, and a missing status file points to evidence collection.</p>
             <div class="pillrow">
               <span class="pill bg-teal">policy</span>
               <span class="pill bg-blue">control</span>
@@ -878,11 +907,51 @@
       </div>
     </section>
 
+    <section class="slide" data-title="Mermaid Planes">
+      <div>
+        <div class="kicker">Mermaid view</div>
+        <h2>Ownership graph for the main harness boundaries.</h2>
+        <p class="lede">This diagram shows which component owns eligibility, scheduling, VM execution, Codex work, tracker writes, and status evidence.</p>
+      </div>
+      <div class="content">
+        <div class="mermaid-panel">
+          <pre class="mermaid">
+flowchart LR
+  workflow["WORKFLOW.md policy"] --> gate{"Linear issue eligible?"}
+  linear["Linear control plane"] --> gate
+  gate -- yes --> orch["Go orchestrator"]
+  gate -- no --> wait["wait for human or dependency"]
+  orch --> vm["Tart macOS VM"]
+  vm --> codex["Codex app-server runner"]
+  codex --> github["GitHub branch and PR"]
+  codex --> linearCloseout["Linear comments and state"]
+  codex -. dynamic tool .-> hostProxy["host-proxied Linear GraphQL"]
+  hostProxy -. host-held key .-> linear
+  orch --> status["logs, artifacts, status JSON"]
+  github --> status
+  linearCloseout --> status
+
+  classDef policy fill:#e1efef,stroke:#abcfcf,color:#171717
+  classDef control fill:#e7eff3,stroke:#adc5d4,color:#171717
+  classDef execute fill:#f5eedf,stroke:#dcc391,color:#171717
+  classDef agent fill:#ece8f4,stroke:#c9bddf,color:#171717
+  classDef evidence fill:#e8f1ea,stroke:#b5d2bf,color:#171717
+  class workflow,hostProxy policy
+  class linear,gate,orch,wait control
+  class vm execute
+  class codex agent
+  class github,linearCloseout,status evidence
+          </pre>
+          <div class="mermaid-note">Mermaid source is embedded in the deck so this diagram can be copied into docs or issues without redrawing the SVG.</div>
+        </div>
+      </div>
+    </section>
+
     <section class="slide" data-title="Component Map">
       <div>
         <div class="kicker">Component map</div>
-        <h2>The system is a small set of hard boundaries.</h2>
-        <p class="lede">Each piece has a narrow job. The design gets reliable by avoiding one mega-agent process that owns everything.</p>
+        <h2>The component map is organized around explicit ownership boundaries.</h2>
+        <p class="lede">Each component has a narrow responsibility: tracker reads, workflow policy, orchestration, VM lifecycle, agent execution, host tools, GitHub output, or status evidence.</p>
       </div>
       <div class="content">
         <div class="diagram">
@@ -945,10 +1014,10 @@
     <section class="slide" data-title="Repo Files">
       <div>
         <div class="kicker">Where the system lives</div>
-        <h2>There are policy files, mechanism packages, and operator scripts.</h2>
+        <h2>The repo separates policy documents, orchestrator packages, and operator scripts.</h2>
       </div>
       <div class="content top">
-        <div class="grid.three">
+        <div class="grid three">
           <div class="panel">
             <div class="label">Policy</div>
             <ul class="clean">
@@ -958,13 +1027,13 @@
             </ul>
           </div>
           <div class="panel">
-            <div class="label">Mechanism</div>
+            <div class="label">Orchestrator packages</div>
             <ul class="clean">
-              <li><strong><code>orchestrator/internal/workflow</code></strong><br>Loads front matter and renders the prompt.</li>
-              <li><strong><code>orchestrator/internal/tracker/linear</code></strong><br>Linear GraphQL reader plus narrow escalation writes.</li>
-              <li><strong><code>orchestrator/internal/workspace/tart</code></strong><br>VM lifecycle and hook execution.</li>
-              <li><strong><code>orchestrator/internal/agent</code></strong><br>Shared runner contract, Codex, Claude.</li>
-              <li><strong><code>orchestrator/internal/orchestrator</code></strong><br>Poll loop, dispatch, retry, cancellation, status.</li>
+              <li><strong><code>orchestrator/internal/workflow</code></strong><br>Parses <code>WORKFLOW.md</code> front matter and renders issue prompts.</li>
+              <li><strong><code>orchestrator/internal/tracker/linear</code></strong><br>Reads Linear issues and performs limited escalation writes.</li>
+              <li><strong><code>orchestrator/internal/workspace/tart</code></strong><br>Creates, boots, prepares, and removes Tart VMs.</li>
+              <li><strong><code>orchestrator/internal/agent</code></strong><br>Defines the shared runner contract and concrete Codex/Claude runners.</li>
+              <li><strong><code>orchestrator/internal/orchestrator</code></strong><br>Runs polling, dispatch, retry, cancellation, cleanup, and status recording.</li>
             </ul>
           </div>
           <div class="panel">
@@ -972,13 +1041,13 @@
             <ul class="clean">
               <li><strong><code>scripts/spur-codex-canary</code></strong><br>Doctor, smoke, discover, preflight, run, verify, checklist.</li>
               <li><strong><code>scripts/spur-snapshot-codex.sh</code></strong><br>Filtered Codex identity snapshot for VMs.</li>
-              <li><strong><code>scripts/spur-store-harness-secret</code></strong><br>Safer helper for storing Linear/GitHub harness secrets.</li>
-              <li><strong><code>/tmp/spur-orchestrator/*.json</code></strong><br>Status proof files when requested.</li>
+              <li><strong><code>scripts/spur-store-harness-secret</code></strong><br>Prompted helper for storing Linear/GitHub harness secrets.</li>
+              <li><strong><code>/tmp/spur-orchestrator/*.json</code></strong><br>Status snapshots when requested.</li>
             </ul>
           </div>
         </div>
         <div class="callout">
-          <p><strong>Practical model:</strong> edit <code>WORKFLOW.md</code> when you want to change agent policy; edit <code>orchestrator/</code> when the scheduler or runner mechanics are wrong.</p>
+          <p><strong>Edit rule:</strong> change <code>WORKFLOW.md</code> for agent policy, prompts, hooks, and runtime limits. Change <code>orchestrator/</code> for scheduler, workspace, runner, or status mechanics.</p>
         </div>
       </div>
     </section>
@@ -990,7 +1059,7 @@
         <p class="lede">It is deliberately versioned in the repo so the agent's operating instructions, eligibility rules, and hooks change with code review rather than invisible local configuration.</p>
       </div>
       <div class="content">
-        <div class="grid.sidebar">
+        <div class="grid sidebar">
           <div class="panel dark">
             <pre>tracker:
   kind: linear
@@ -1051,7 +1120,7 @@ codex:
             <text class="subtxt" x="425" y="166" text-anchor="middle">parse config</text>
             <text class="subtxt" x="425" y="187" text-anchor="middle">rebuild worker config</text>
             <rect class="node blue" x="638" y="84" width="230" height="60"></rect>
-            <text class="txt" x="753" y="111" text-anchor="middle">safe live reload</text>
+            <text class="txt" x="753" y="111" text-anchor="middle">live reload applies</text>
             <text class="subtxt" x="753" y="130" text-anchor="middle">prompt, hooks, limits, states</text>
             <rect class="node red" x="638" y="180" width="230" height="60"></rect>
             <text class="txt" x="753" y="207" text-anchor="middle">guarded live reload</text>
@@ -1061,10 +1130,10 @@ codex:
             <path class="edge red" marker-end="url(#arrow4)" d="M 530 190 H 638"></path>
           </svg>
         </div>
-        <div class="grid.three">
-          <div class="panel bg-green"><h3>Why it matters</h3><p>If a prompt is weak or a hook needs a path change, future runs can pick it up while the service keeps running.</p></div>
-          <div class="panel bg-yellow"><h3>What is guarded</h3><p>Switching between <code>claudecode</code> and <code>codex</code> requires restart or canary because the runner object is built at startup.</p></div>
-          <div class="panel bg-blue"><h3>What gets safer</h3><p>Operational policy can be tightened quickly when a real run exposes a gap, such as missing handoff comments.</p></div>
+        <div class="grid three">
+          <div class="panel bg-green"><h3>Reload scope</h3><p>If a prompt, hook command, active state, timeout, or limit changes, future runs can pick it up while the service keeps running.</p></div>
+          <div class="panel bg-yellow"><h3>Restart-only change</h3><p>Switching between <code>claudecode</code> and <code>codex</code> requires restart or canary because the runner object is built at startup.</p></div>
+          <div class="panel bg-blue"><h3>Operational response</h3><p>Operators can tighten policy after a run exposes a gap, such as missing handoff comments, without stopping active work.</p></div>
         </div>
       </div>
     </section>
@@ -1075,7 +1144,7 @@ codex:
         <h2>Not every issue is runnable. The scheduler applies Spur policy before Codex sees anything.</h2>
       </div>
       <div class="content">
-        <div class="grid.wide-left">
+        <div class="grid wide-left">
           <div class="diagram">
             <svg viewBox="0 0 760 360" role="img" aria-label="Eligibility filter">
               <defs>
@@ -1108,7 +1177,7 @@ codex:
             </svg>
           </div>
           <div class="panel">
-            <div class="label">Why so strict?</div>
+            <div class="label">Eligibility rationale</div>
             <ul class="bullets">
               <li><strong>Ready</strong> means the issue has enough spec to attempt.</li>
               <li><strong>AFK</strong> means it is explicitly permitted for unattended agent work.</li>
@@ -1125,7 +1194,7 @@ codex:
       <div>
         <div class="kicker">Boundary map</div>
         <h2>Host and VM responsibilities are intentionally different.</h2>
-        <p class="lede">The host coordinates and protects credentials. The VM contains the risky, mutable work area where the agent can run with broad permissions.</p>
+        <p class="lede">The host coordinates work and protects credentials. The VM contains the mutable workspace where the agent can edit code, run tools, and create artifacts.</p>
       </div>
       <div class="content top">
         <div class="swimlane">
@@ -1154,7 +1223,7 @@ codex:
           <div class="lane-cell bg-red"><strong>Disposable</strong>Terminal issues remove the VM.</div>
         </div>
         <div class="callout">
-          <p><strong>Safety posture:</strong> give the agent freedom inside the VM, but keep orchestration authority and the strongest credential boundary on the host.</p>
+          <p><strong>Credential boundary:</strong> the agent can mutate the VM workspace, while orchestration authority and host-held credentials stay outside the guest.</p>
         </div>
       </div>
     </section>
@@ -1162,17 +1231,17 @@ codex:
     <section class="slide" data-title="Tart">
       <div>
         <div class="kicker">Workspace model</div>
-        <h2>Tart is the reason the agent can do real iOS work.</h2>
-        <p class="lede">Docker is excellent for Linux services. Tart gives this harness actual macOS guests, so the agent has the tools that only exist on macOS.</p>
+        <h2>Tart provides the macOS guest required for iOS build and simulator work.</h2>
+        <p class="lede">Docker is appropriate for Linux services. Tart runs macOS guests, so the agent has access to Xcode, Simulator, Keychain, codesign, and other Apple tooling.</p>
       </div>
       <div class="content">
-        <div class="grid.two">
+        <div class="grid two">
           <div class="panel bg-yellow">
             <h3>Tart VM</h3>
             <ul class="bullets">
               <li>Full macOS virtual machine on Apple Silicon.</li>
               <li>Can run Xcode, iOS Simulator, Keychain, codesign, and native Apple tooling.</li>
-              <li>Heavier than Docker, but correct for iOS work.</li>
+              <li>Higher startup and resource cost than Docker; required when a task needs macOS APIs or Apple tooling.</li>
               <li>Per-issue clone is named like <code>spur-ticket-SAM-54</code>.</li>
             </ul>
           </div>
@@ -1206,7 +1275,7 @@ codex:
         <p class="lede">They are declared in <code>WORKFLOW.md</code>, but run on the host with VM metadata in environment variables.</p>
       </div>
       <div class="content">
-        <div class="grid.four">
+        <div class="grid four">
           <div class="panel bg-blue">
             <div class="label">after_create</div>
             <h3>First clone setup</h3>
@@ -1253,7 +1322,7 @@ codex:
         <p class="lede">Claude and Codex are concrete implementations. The worker does not need to know every protocol detail; it needs a start/resume result, events, telemetry, and final status.</p>
       </div>
       <div class="content">
-        <div class="grid.two">
+        <div class="grid two">
           <div class="panel">
             <div class="label">Shared concepts</div>
             <table>
@@ -1283,7 +1352,7 @@ codex:
     <section class="slide" data-title="Codex Protocol">
       <div>
         <div class="kicker">Codex app-server runner</div>
-        <h2>Codex is not invoked as a blind one-shot command; it is a protocol peer.</h2>
+        <h2>The Codex runner uses the app-server protocol instead of a one-shot shell command.</h2>
       </div>
       <div class="content">
         <div class="diagram">
@@ -1326,7 +1395,7 @@ codex:
             <text class="tiny" x="392" y="338" text-anchor="middle">events, session IDs, token usage, rate limits, final status</text>
           </svg>
         </div>
-        <div class="grid.three">
+        <div class="grid three">
           <div class="panel"><h3>What gets captured</h3><p>Session ID, thread ID, turn ID, completion or error event, token usage, and rate-limit snapshots.</p></div>
           <div class="panel"><h3>What gets advertised</h3><p>Dynamic tools are sent on both thread start and resume so continuation turns keep host-side capabilities.</p></div>
           <div class="panel"><h3>What gets rejected</h3><p>Unsupported app-server requests are rejected rather than silently hanging; approval requests are answered with a cancel decision.</p></div>
@@ -1334,21 +1403,55 @@ codex:
       </div>
     </section>
 
+    <section class="slide" data-title="Mermaid Codex Sequence">
+      <div>
+        <div class="kicker">Mermaid view</div>
+        <h2>The Codex runner is a JSON-RPC session over SSH with host-side tool calls.</h2>
+        <p class="lede">The sequence diagram makes the resumable protocol clearer than a static component map: initialize, start or resume, run a turn, answer tools, then record evidence.</p>
+      </div>
+      <div class="content">
+        <div class="mermaid-panel">
+          <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant W as Worker
+  participant VM as Tart VM over SSH
+  participant C as Codex app-server
+  participant H as Host tools
+  participant L as Linear API
+  participant S as Status JSON
+
+  W->>VM: boot and run lifecycle hooks
+  W->>C: initialize JSON-RPC
+  W->>C: thread/start or thread/resume
+  W->>C: turn/start with rendered WORKFLOW prompt
+  C->>H: dynamic tool request: linear_graphql
+  H->>L: GraphQL with host-held token
+  L-->>H: result
+  H-->>C: tool result
+  C-->>W: turn_completed with usage and ids
+  W->>S: write session, thread, turn, tokens, status
+          </pre>
+          <div class="mermaid-note">This captures the production credential boundary: Codex can ask for Linear work, but the host performs the authenticated call.</div>
+        </div>
+      </div>
+    </section>
+
     <section class="slide" data-title="Credentials">
       <div>
         <div class="kicker">Credential boundary</div>
-        <h2>Codex enables a better Linear secret boundary.</h2>
-        <p class="lede">The old mode injected Linear into the VM. The Codex mode can keep Linear on the host and expose only a narrow GraphQL tool to the agent.</p>
+        <h2>Codex supports keeping the Linear token on the host.</h2>
+        <p class="lede"><code>vm_env</code> injects Linear access into the VM. <code>host_proxy</code> keeps Linear access on the host and exposes only a scoped GraphQL tool to the agent.</p>
       </div>
       <div class="content">
-        <div class="grid.two">
+        <div class="grid two">
           <div class="panel bg-red">
             <div class="label">vm_env</div>
             <h3>Token enters the VM</h3>
             <ul class="bullets">
               <li>Hook writes <code>LINEAR_API_KEY</code> for agent use.</li>
               <li>Works for simple CLI/API calls.</li>
-              <li>Higher blast radius if the VM or task goes wrong.</li>
+              <li>Token exposure includes the guest environment.</li>
               <li>Still the literal default in the merged <code>WORKFLOW.md</code> until you flip production.</li>
             </ul>
           </div>
@@ -1390,12 +1493,12 @@ codex:
     <section class="slide" data-title="Poll Loop">
       <div>
         <div class="kicker">Main daemon loop</div>
-        <h2>The orchestrator loop is boring on purpose.</h2>
+        <h2>The orchestrator loop repeatedly reconciles Linear state with running VM work.</h2>
         <p class="lede">Every tick reconciles known work, reads Linear, filters candidates, dispatches up to the concurrency cap, and records what happened.</p>
       </div>
       <div class="content">
         <div class="timeline">
-          <div class="step"><div class="num">tick</div><h3>reload</h3><p>Check <code>WORKFLOW.md</code> mtime and update safe runtime fields.</p></div>
+          <div class="step"><div class="num">tick</div><h3>reload</h3><p>Check <code>WORKFLOW.md</code> mtime and update reloadable runtime fields.</p></div>
           <div class="step"><div class="num">01</div><h3>refresh</h3><p>Re-fetch state for running issues and terminal candidates.</p></div>
           <div class="step"><div class="num">02</div><h3>cancel</h3><p>Stop active runs that became terminal or left active states.</p></div>
           <div class="step"><div class="num">03</div><h3>cleanup</h3><p>Run <code>before_remove</code> and delete terminal VMs.</p></div>
@@ -1404,7 +1507,7 @@ codex:
           <div class="step"><div class="num">06</div><h3>dispatch</h3><p>Start workers up to <code>max_concurrent_agents</code>.</p></div>
           <div class="step"><div class="num">07</div><h3>snapshot</h3><p>Write logs and optional JSON status.</p></div>
         </div>
-        <div class="grid.three">
+        <div class="grid three">
           <div class="metric"><div class="value">30s</div><div class="caption">default polling interval</div></div>
           <div class="metric"><div class="value">2</div><div class="caption">macOS guest concurrency cap</div></div>
           <div class="metric"><div class="value">20</div><div class="caption">default max turns per issue</div></div>
@@ -1475,7 +1578,7 @@ codex:
             <path class="edge" marker-end="url(#arrow8)" d="M 805 175 H 870"></path>
           </svg>
         </div>
-        <div class="grid.three">
+        <div class="grid three">
           <div class="panel"><h3>Success path</h3><p>Agent opens PR, comments on Linear, moves issue to <code>In Review</code>. Orchestrator records success and releases the worker.</p></div>
           <div class="panel"><h3>Continuation path</h3><p>If work remains active and allowed turns remain, the next run can resume the prior session or reuse the same VM state.</p></div>
           <div class="panel"><h3>Terminal path</h3><p>If Linear reaches <code>Done</code>, <code>Canceled</code>, or <code>Duplicate</code>, the VM is cleaned up.</p></div>
@@ -1512,7 +1615,7 @@ codex:
             <p>Side exit. Used when the agent needs a decision or the loop guard detects unproductive success.</p>
           </div>
         </div>
-        <div class="grid.three">
+        <div class="grid three">
           <div class="panel"><h3>Active states</h3><p><code>Ready</code> and <code>In Progress</code> are pollable states in <code>WORKFLOW.md</code>.</p></div>
           <div class="panel"><h3>Review state</h3><p><code>In Review</code> is intentionally not active, so the orchestrator does not keep dispatching after PR handoff.</p></div>
           <div class="panel"><h3>Terminal states</h3><p><code>Done</code>, <code>Canceled</code>, and <code>Duplicate</code> trigger cleanup.</p></div>
@@ -1520,37 +1623,65 @@ codex:
       </div>
     </section>
 
+    <section class="slide" data-title="Mermaid State Machine">
+      <div>
+        <div class="kicker">Mermaid view</div>
+        <h2>Linear state transitions are used instead of a separate persistent queue.</h2>
+        <p class="lede">This diagram separates normal handoff, terminal cleanup, cancellation, and the stuck-loop escalation path.</p>
+      </div>
+      <div class="content">
+        <div class="mermaid-panel">
+          <pre class="mermaid">
+stateDiagram-v2
+  [*] --> Ready: human triage
+  Ready --> InProgress: eligible AFK issue claimed
+  InProgress --> InReview: agent opens PR and posts closeout
+  InReview --> Done: PR merged and accepted
+  Ready --> NeedsHuman: HITL label or missing dependency
+  InProgress --> NeedsHuman: repeated unproductive success
+  InProgress --> Canceled: issue leaves active states
+  InProgress --> Done: issue becomes terminal externally
+  Done --> Cleanup: before_remove hook
+  Canceled --> Cleanup: before_remove hook
+  Cleanup --> [*]: VM deleted and artifacts copied
+  NeedsHuman --> Ready: human resolves blocker
+          </pre>
+          <div class="mermaid-note">The scheduler watches Linear and reconciles to these transitions instead of maintaining a separate persistent queue.</div>
+        </div>
+      </div>
+    </section>
+
     <section class="slide" data-title="Agent Handoff">
       <div>
         <div class="kicker">Agent-owned handoff</div>
-        <h2>The agent is responsible for closing the loop, not just writing code.</h2>
-        <p class="lede">This is why the prompt hardening matters. A code change without PR, comments, and Linear state is operationally incomplete.</p>
+        <h2>The agent is responsible for implementation, PR handoff, and tracker closeout.</h2>
+        <p class="lede">The workflow prompt treats a code change without a PR, Linear comments, and a state transition as operationally incomplete.</p>
       </div>
       <div class="content">
-        <div class="grid.two">
+        <div class="grid two">
           <div class="panel">
             <div class="label">Required before exit</div>
             <ul class="bullets">
               <li>Post pickup comment on the Linear issue.</li>
               <li>Move issue to <code>In Progress</code> while work is active.</li>
               <li>Create a branch and PR against <code>main</code>.</li>
-              <li>Post closeout comment with PR link, AC table, drift list, artifacts, and verification.</li>
+              <li>Post closeout comment with PR link, acceptance-criteria table, drift list, artifacts, and verification.</li>
               <li>Move issue to <code>In Review</code> after the PR opens.</li>
             </ul>
           </div>
           <div class="panel">
             <div class="label">Why the orchestrator does not do it all</div>
-            <p>The scheduler does not know whether the implementation truly satisfies the ticket. The agent just did the work, saw the diff, ran the tests, and has the right context to explain the result. The orchestrator only steps in for narrow stuck-loop escalation.</p>
+            <p>The scheduler does not inspect the implementation deeply enough to judge whether the ticket is satisfied. The agent has the diff, test output, and task context needed to explain the result. The orchestrator only handles bounded stuck-loop escalation.</p>
             <div class="pillrow">
-              <span class="pill bg-blue">agent writes normal comments</span>
+              <span class="pill bg-blue">agent writes handoff comments</span>
               <span class="pill bg-green">agent opens PR</span>
               <span class="pill bg-yellow">orchestrator records status</span>
-              <span class="pill bg-red">orchestrator escalates loops</span>
+              <span class="pill bg-red">orchestrator handles loop escalation</span>
             </div>
           </div>
         </div>
         <div class="callout">
-          <p><strong>Definition of complete:</strong> code merged is not the only target. The issue needs an auditable path from Linear -> VM work -> PR -> verification -> Linear state.</p>
+          <p><strong>Definition of complete:</strong> code merged is not the only target. The issue needs an auditable path from Linear, to VM work, to PR, to verification, to Linear state.</p>
         </div>
       </div>
     </section>
@@ -1558,8 +1689,8 @@ codex:
     <section class="slide" data-title="Succeeding">
       <div>
         <div class="kicker">Stuck-loop guard</div>
-        <h2>"Successful" means the runner returned cleanly. It does not prove the ticket moved forward.</h2>
-        <p class="lede">The bad case is an agent that exits with success but leaves Linear active. Without a guard, the orchestrator would keep continuing until <code>max_turns</code>.</p>
+        <h2>A clean runner exit does not guarantee that the issue moved forward.</h2>
+        <p class="lede">The failure case is an agent turn that exits successfully while Linear remains active. Without a guard, the orchestrator would continue the issue until <code>max_turns</code>.</p>
       </div>
       <div class="content">
         <div class="diagram">
@@ -1588,10 +1719,10 @@ codex:
             <text class="tiny" x="333" y="196" text-anchor="middle">continue until threshold if issue is still active</text>
           </svg>
         </div>
-        <div class="grid.three">
-          <div class="panel bg-green"><h3>Good success</h3><p>Runner exits, PR exists, closeout exists, issue is now <code>In Review</code> or terminal.</p></div>
-          <div class="panel bg-yellow"><h3>Suspicious success</h3><p>Runner exits cleanly, but issue remains <code>Ready</code> or <code>In Progress</code>.</p></div>
-          <div class="panel bg-red"><h3>Escalated success</h3><p>After <code>agent.max_unproductive_successes</code>, the orchestrator stops burning turns and moves the issue to <code>Needs Human</code>.</p></div>
+        <div class="grid three">
+          <div class="panel bg-green"><h3>Productive success</h3><p>Runner exits, PR exists, closeout exists, issue is now <code>In Review</code> or terminal.</p></div>
+          <div class="panel bg-yellow"><h3>Unproductive success</h3><p>Runner exits cleanly, but issue remains <code>Ready</code> or <code>In Progress</code>.</p></div>
+          <div class="panel bg-red"><h3>Escalation threshold</h3><p>After <code>agent.max_unproductive_successes</code>, the orchestrator stops continuing the issue and moves it to <code>Needs Human</code>.</p></div>
         </div>
       </div>
     </section>
@@ -1603,7 +1734,7 @@ codex:
         <p class="lede">The Codex app-server path gives the harness stable identifiers for the overall session, the app-server thread, and the specific turn that produced a result.</p>
       </div>
       <div class="content">
-        <div class="grid.three">
+        <div class="grid three">
           <div class="panel bg-violet">
             <div class="label">session_id</div>
             <h3>Run handle</h3>
@@ -1648,7 +1779,7 @@ codex:
           </svg>
         </div>
         <div class="callout">
-          <p><strong>Why it matters:</strong> if a canary says it succeeded, the proof file can name the exact Codex session/thread/turn that succeeded, not just "some process exited zero."</p>
+          <p><strong>Verification detail:</strong> when a canary succeeds, the status snapshot names the exact Codex session, thread, and turn that produced the result.</p>
         </div>
       </div>
     </section>
@@ -1656,11 +1787,11 @@ codex:
     <section class="slide" data-title="Status">
       <div>
         <div class="kicker">Status snapshots</div>
-        <h2>The harness can leave a machine-readable proof file.</h2>
+        <h2>The harness can write a machine-readable status snapshot.</h2>
         <p class="lede">When <code>--status-file</code> is set, the orchestrator writes an atomic JSON snapshot with the runtime state and recent run evidence.</p>
       </div>
       <div class="content">
-        <div class="grid.sidebar">
+        <div class="grid sidebar">
           <div class="panel dark">
             <pre>{
   "agent_runner": "codex",
@@ -1689,7 +1820,7 @@ codex:
             <div class="status-list">
               <div class="status-row"><span class="tag">agent_runner</span><p>Which runner mode produced the snapshot: <code>codex</code> or <code>claudecode</code>.</p></div>
               <div class="status-row"><span class="tag">linear_access</span><p>Credential mode: <code>vm_env</code> or <code>host_proxy</code>.</p></div>
-              <div class="status-row"><span class="tag">recent_runs</span><p>Per-run proof: issue, status, timestamps, session/thread/turn IDs, tokens, and rate limits.</p></div>
+              <div class="status-row"><span class="tag">recent_runs</span><p>Per-run evidence: issue, status, timestamps, session/thread/turn IDs, tokens, and rate limits.</p></div>
               <div class="status-row"><span class="tag">needs_human</span><p>Issues stopped by the unproductive-success guard.</p></div>
               <div class="status-row"><span class="tag">workflow_*</span><p>Path and modification time of the workflow contract used.</p></div>
             </div>
@@ -1704,11 +1835,11 @@ codex:
     <section class="slide" data-title="Operator Scripts">
       <div>
         <div class="kicker">Operator scripts</div>
-        <h2>Operator scripts are the safe handles for running and proving the harness.</h2>
-        <p class="lede">They are not app code. They are repo-owned commands for the person operating the agent service.</p>
+        <h2>Operator scripts provide repeatable commands for setup, canaries, and verification.</h2>
+        <p class="lede">They are repo-owned commands for the person operating the agent service. They wrap prerequisites, known defaults, and status-file checks.</p>
       </div>
       <div class="content">
-        <div class="grid.three">
+        <div class="grid three">
           <div class="panel bg-blue">
             <h3><code>spur-codex-canary</code></h3>
             <p>One wrapper for doctor, smoke, discover, preflight, run, verify, and checklist. It sources harness env, uses defaults, and writes predictable status files.</p>
@@ -1719,7 +1850,7 @@ codex:
           </div>
           <div class="panel bg-yellow">
             <h3><code>spur-store-harness-secret</code></h3>
-            <p>Stores Linear and GitHub harness secrets through safer prompts and env-file fallback, avoiding shell history leaks.</p>
+            <p>Stores Linear and GitHub harness secrets through prompted input and env-file fallback, avoiding shell history leaks.</p>
           </div>
         </div>
         <div class="panel dark">
@@ -1737,8 +1868,8 @@ scripts/spur-codex-canary checklist SAM-54</pre>
     <section class="slide" data-title="Canary">
       <div>
         <div class="kicker">Canary flow</div>
-        <h2>A canary is a controlled proof run before trusting the path unattended.</h2>
-        <p class="lede">It intentionally exercises the same machinery as production, but with one known issue and a machine-readable proof artifact.</p>
+        <h2>A canary is a controlled verification run for the unattended path.</h2>
+        <p class="lede">It exercises the same machinery as production with one known issue and a machine-readable status artifact.</p>
       </div>
       <div class="content">
         <div class="timeline">
@@ -1747,8 +1878,8 @@ scripts/spur-codex-canary checklist SAM-54</pre>
           <div class="step"><div class="num">discover</div><h3>Linear candidates</h3><p>List eligible and rejected active issues.</p></div>
           <div class="step"><div class="num">preflight</div><h3>target issue</h3><p>Check eligibility, credentials, and Codex handshake.</p></div>
           <div class="step"><div class="num">run</div><h3>real VM turn</h3><p>Boot VM, run hooks, launch Codex, collect status.</p></div>
-          <div class="step"><div class="num">verify</div><h3>status proof</h3><p>Validate JSON says <code>codex</code>, <code>host_proxy</code>, succeeded.</p></div>
-          <div class="step"><div class="num">checklist</div><h3>human audit</h3><p>Inspect Linear comments, PR, CI, logs, telemetry.</p></div>
+          <div class="step"><div class="num">verify</div><h3>status check</h3><p>Validate JSON says <code>codex</code>, <code>host_proxy</code>, succeeded.</p></div>
+          <div class="step"><div class="num">checklist</div><h3>operator audit</h3><p>Inspect Linear comments, PR, CI, logs, telemetry.</p></div>
           <div class="step"><div class="num">decide</div><h3>production</h3><p>Switch defaults or run another canary.</p></div>
         </div>
         <div class="callout">
@@ -1763,7 +1894,7 @@ scripts/spur-codex-canary checklist SAM-54</pre>
         <h2>From Linear issue to merged code, the system crosses seven boundaries.</h2>
       </div>
       <div class="content top">
-        <div class="grid.two">
+        <div class="grid two">
           <div class="panel">
             <div class="label">Forward path</div>
             <ol class="bullets">
@@ -1783,8 +1914,8 @@ scripts/spur-codex-canary checklist SAM-54</pre>
               <li>If the issue becomes terminal, cleanup runs and VM is deleted.</li>
               <li>If the issue leaves active states, worker is canceled and claim is released.</li>
               <li>If successful turns leave the issue active repeatedly, it escalates to <code>Needs Human</code>.</li>
-              <li>If the operator changes <code>WORKFLOW.md</code>, future runs reload safe policy changes.</li>
-              <li>If a canary is running, the proof file can be verified without live credentials.</li>
+              <li>If the operator changes <code>WORKFLOW.md</code>, future runs reload supported policy changes.</li>
+              <li>If a canary is running, the status file can be verified without live credentials.</li>
               <li>If GitHub CI fails, the PR/checks become the next debugging surface.</li>
             </ol>
           </div>
@@ -1821,16 +1952,16 @@ scripts/spur-codex-canary checklist SAM-54</pre>
 
     <section class="slide" data-title="SAM-54">
       <div>
-        <div class="kicker">Concrete proof</div>
-        <h2>SAM-54 proved the Codex path with a real issue, VM, PR, and status artifact.</h2>
+        <div class="kicker">Concrete evidence</div>
+        <h2>SAM-54 verified the Codex path with a real issue, VM, PR, and status artifact.</h2>
       </div>
       <div class="content">
-        <div class="grid.three">
+        <div class="grid three">
           <div class="metric"><div class="value">SAM-54</div><div class="caption">Linear canary issue</div></div>
           <div class="metric"><div class="value">PR #102</div><div class="caption">Codex-created canary PR</div></div>
           <div class="metric"><div class="value">PR #103</div><div class="caption">Main implementation PR</div></div>
         </div>
-        <div class="grid.two">
+        <div class="grid two">
           <div class="panel">
             <div class="label">Canary evidence</div>
             <ul class="bullets">
@@ -1858,11 +1989,11 @@ scripts/spur-codex-canary checklist SAM-54</pre>
     <section class="slide" data-title="Failure Modes">
       <div>
         <div class="kicker">Failure handling</div>
-        <h2>The harness is designed to fail into visible states.</h2>
-        <p class="lede">A robust unattended runner is less about never failing and more about making failures bounded, inspectable, and recoverable.</p>
+        <h2>The harness records failures as bounded, inspectable states.</h2>
+        <p class="lede">Unattended runs can fail because of tracker changes, VM setup, hooks, timeouts, unsupported tool calls, or missing handoff. The harness should make each case visible and recoverable.</p>
       </div>
       <div class="content">
-        <div class="grid.three">
+        <div class="grid three">
           <div class="panel bg-yellow">
             <h3>VM or hook failure</h3>
             <p>Worker records an error, the run can retry according to backoff, and logs/artifacts identify which hook failed.</p>
@@ -1881,10 +2012,10 @@ scripts/spur-codex-canary checklist SAM-54</pre>
           </div>
           <div class="panel bg-green">
             <h3>Unproductive success</h3>
-            <p>Repeated clean exits with active Linear state move to <code>Needs Human</code> and stop burning turns.</p>
+            <p>Repeated clean exits with active Linear state move to <code>Needs Human</code> and stop additional continuation turns.</p>
           </div>
           <div class="panel bg-teal">
-            <h3>Missing status proof</h3>
+            <h3>Missing status snapshot</h3>
             <p>In one-shot mode, requested <code>--status-file</code> write failure fails the run instead of becoming a hidden warning.</p>
           </div>
         </div>
@@ -1894,11 +2025,11 @@ scripts/spur-codex-canary checklist SAM-54</pre>
     <section class="slide" data-title="Production Posture">
       <div>
         <div class="kicker">Production posture</div>
-        <h2>Codex is proven; the default switch is a policy choice.</h2>
-        <p class="lede">The merged code still keeps Claude as the literal default in <code>WORKFLOW.md</code>, but the canary proved the Codex runner and host-proxy path. If Codex is the only production runner, flip these defaults.</p>
+        <h2>The Codex path is verified, but <code>WORKFLOW.md</code> still controls the production default.</h2>
+        <p class="lede">The merged workflow still keeps Claude as the literal default, while the canary verified the Codex runner and host-proxy path. Moving production to Codex requires changing the workflow defaults.</p>
       </div>
       <div class="content">
-        <div class="grid.two">
+        <div class="grid two">
           <div class="panel dark">
             <div class="label">Current merged default</div>
             <pre>agent:
@@ -1916,7 +2047,7 @@ credentials:
   linear_access: host_proxy</pre>
           </div>
         </div>
-        <div class="grid.three">
+        <div class="grid three">
           <div class="panel"><h3>What changes</h3><p>Daemon dispatch starts Codex by default and keeps Linear on the host.</p></div>
           <div class="panel"><h3>What stays</h3><p>Linear policy, Tart VMs, hooks, GitHub PR flow, status snapshots, and handoff prompt remain the same.</p></div>
           <div class="panel"><h3>What to keep briefly</h3><p>The Claude runner can remain as a fallback implementation until you are comfortable deleting legacy code.</p></div>
@@ -1930,7 +2061,7 @@ credentials:
         <h2>Terms used by the harness</h2>
       </div>
       <div class="content top">
-        <div class="grid.two">
+        <div class="grid two">
           <div class="panel">
             <table>
               <tr><th>Term</th><th>Meaning</th></tr>
@@ -1944,11 +2075,11 @@ credentials:
           <div class="panel">
             <table>
               <tr><th>Term</th><th>Meaning</th></tr>
-              <tr><td>canary</td><td>A controlled real issue run that proves a path before production use.</td></tr>
+              <tr><td>canary</td><td>A controlled real issue run that verifies a path before production use.</td></tr>
               <tr><td>dynamic tool</td><td>A host-side tool advertised to Codex app-server.</td></tr>
               <tr><td>terminal state</td><td>Linear states such as <code>Done</code>, <code>Canceled</code>, or <code>Duplicate</code>.</td></tr>
               <tr><td>Needs Human</td><td>Escalation state when automation is no longer making productive progress.</td></tr>
-              <tr><td>status snapshot</td><td>JSON proof file with runtime state and recent run telemetry.</td></tr>
+              <tr><td>status snapshot</td><td>JSON file with runtime state and recent run telemetry.</td></tr>
             </table>
           </div>
         </div>
@@ -1958,10 +2089,10 @@ credentials:
     <section class="slide" data-title="Recap">
       <div>
         <div class="kicker">Recap</div>
-        <h2>The important mental model</h2>
+        <h2>Summary of system ownership</h2>
       </div>
       <div class="content centered">
-        <div class="grid.three" style="width:100%;">
+        <div class="grid three" style="width:100%;">
           <div class="panel bg-blue">
             <h3>Linear decides what is eligible</h3>
             <p>Ready/In Progress, AFK, no HITL, blockers Done, Spur project.</p>
@@ -1975,7 +2106,7 @@ credentials:
             <p>Implements, verifies, opens PR, comments on Linear, and moves issue state according to the workflow prompt.</p>
           </div>
         </div>
-        <p class="lede">That separation is the system. It lets the repo own policy, the orchestrator own safety, and the agent own implementation.</p>
+        <p class="lede">The repo owns policy, the orchestrator owns isolation and scheduling, and the agent owns implementation and handoff.</p>
       </div>
       <div class="footer-note"><span>Deck file: <code>explainers/symphony-harness.html</code></span><span>Last updated from merged PR #103 state.</span></div>
     </section>
@@ -2054,6 +2185,30 @@ credentials:
   fromHash();
   update(false);
 })();
+</script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'base',
+    themeVariables: {
+      background: '#ffffff',
+      primaryColor: '#e7eff3',
+      primaryBorderColor: '#adc5d4',
+      primaryTextColor: '#171717',
+      secondaryColor: '#e8f1ea',
+      secondaryBorderColor: '#b5d2bf',
+      tertiaryColor: '#f5eedf',
+      tertiaryBorderColor: '#dcc391',
+      lineColor: '#6c7177',
+      textColor: '#171717',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif'
+    }
+  });
+
+  await mermaid.run({ querySelector: '.mermaid' });
 </script>
 </body>
 </html>
