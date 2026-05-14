@@ -340,7 +340,7 @@ func (o *Orchestrator) reloadWorkflowIfChanged() {
 	if cfg.AgentRunnerName() != currentRunner {
 		o.workflowModTime = info.ModTime()
 		o.mu.Unlock()
-		o.Logger.Warn("workflow reload skipped runner change; restart orchestrator or use one-shot canary",
+		o.Logger.Warn("workflow reload skipped runner change; restart orchestrator",
 			"path", path,
 			"current_runner", currentRunner,
 			"new_runner", cfg.AgentRunnerName(),

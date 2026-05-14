@@ -703,7 +703,7 @@ func TestReloadWorkflowIfChangedUpdatesSchedulerAndWorker(t *testing.T) {
 	}
 }
 
-func TestReloadWorkflowIfChangedSkipsRunnerClassChange(t *testing.T) {
+func TestReloadWorkflowIfChangedKeepsLastGoodConfigOnInvalidRunner(t *testing.T) {
 	t.Parallel()
 	path := writeWorkflowForReloadTest(t, 1, 1000, "# Old prompt")
 	def, err := workflow.Load(path)
@@ -717,20 +717,16 @@ func TestReloadWorkflowIfChangedSkipsRunnerClassChange(t *testing.T) {
 		t.Fatalf("EnableWorkflowReload: %v", err)
 	}
 
-	writeWorkflowForReloadTestAtPathWithRunner(t, path, "codex", 3, 2000, "# New prompt")
+	writeWorkflowForReloadTestAtPathWithRunner(t, path, "other", 3, 2000, "# New prompt")
 	future := time.Now().Add(2 * time.Second)
 	if err := os.Chtimes(path, future, future); err != nil {
 		t.Fatalf("Chtimes: %v", err)
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat: %v", err)
-	}
 
 	o.reloadWorkflowIfChanged()
 
-	if got := o.Config.AgentRunnerName(); got != "claudecode" {
-		t.Fatalf("orchestrator runner = %q, want claudecode", got)
+	if got := o.Config.AgentRunnerName(); got != "codex" {
+		t.Fatalf("orchestrator runner = %q, want codex", got)
 	}
 	if o.Config.Agent.MaxConcurrentAgents != 1 {
 		t.Fatalf("orchestrator max_concurrent_agents = %d, want original 1", o.Config.Agent.MaxConcurrentAgents)
@@ -738,10 +734,6 @@ func TestReloadWorkflowIfChangedSkipsRunnerClassChange(t *testing.T) {
 	if o.Workflow.PromptTemplate != "# Old prompt" {
 		t.Fatalf("orchestrator prompt = %q, want old prompt", o.Workflow.PromptTemplate)
 	}
-	if !o.workflowModTime.Equal(info.ModTime()) {
-		t.Fatalf("workflow modtime = %s, want %s", o.workflowModTime, info.ModTime())
-	}
-
 	worker.mu.Lock()
 	defer worker.mu.Unlock()
 	if worker.workflowCfg.Agent.MaxConcurrentAgents != 0 {
@@ -801,8 +793,8 @@ func TestStatusSnapshotIncludesRunningAndRetryingWork(t *testing.T) {
 	if snapshot.PollIntervalMs != validConfig().Polling.IntervalMs {
 		t.Fatalf("poll interval = %d", snapshot.PollIntervalMs)
 	}
-	if snapshot.AgentRunner != "claudecode" || snapshot.LinearAccess != "vm_env" {
-		t.Fatalf("runner/access = %q/%q, want claudecode/vm_env", snapshot.AgentRunner, snapshot.LinearAccess)
+	if snapshot.AgentRunner != "codex" || snapshot.LinearAccess != "host_proxy" {
+		t.Fatalf("runner/access = %q/%q, want codex/host_proxy", snapshot.AgentRunner, snapshot.LinearAccess)
 	}
 	if len(snapshot.Running) != 1 || snapshot.Running[0].Identifier != "SAM-1" {
 		t.Fatalf("running = %+v, want SAM-1", snapshot.Running)
@@ -904,8 +896,12 @@ func validConfig() workflow.ServiceConfig {
 			MaxRetryBackoffMs:      300000,
 			MaxUnproductiveSuccess: 3,
 		},
-		ClaudeCode: workflow.ClaudeCodeConfig{
-			Command: "claude --print",
+		Credentials: workflow.CredentialsConfig{LinearAccess: "host_proxy"},
+		Codex: workflow.CodexConfig{
+			Command:        "codex app-server",
+			TurnTimeoutMs:  3600000,
+			ReadTimeoutMs:  5000,
+			StallTimeoutMs: 300000,
 		},
 	}
 }
@@ -938,8 +934,8 @@ agent:
   max_concurrent_agents: ` + strconv.Itoa(maxConcurrent) + `
   max_unproductive_successes: 3
 ` + runnerLine + `
-claudecode:
-  command: claude --print
+codex:
+  command: codex app-server
 ---
 
 ` + prompt + `

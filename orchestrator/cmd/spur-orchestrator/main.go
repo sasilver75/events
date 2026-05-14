@@ -1,6 +1,6 @@
 // Command spur-orchestrator implements OpenAI's Symphony spec adapted for
-// Spur. Polls Linear, dispatches per-issue Tart VM workspaces, runs Claude
-// Code agents inside them, reconciles state.
+// Spur. Polls Linear, dispatches per-issue Tart VM workspaces, runs Codex
+// app-server agents inside them, reconciles state.
 //
 // Reference: https://github.com/openai/symphony/blob/main/SPEC.md
 // Adaptations: docs/agents/harness.md
@@ -13,20 +13,17 @@
 //	                                 work completes
 //	spur-orchestrator --once --issue SAM-12
 //	                               → dispatch one specific issue and exit
-//	spur-orchestrator --once --issue SAM-12 --codex-canary
-//	                               → dispatch one issue with Codex + host-proxy
-//	                                 Linear access, without editing WORKFLOW.md
-//	spur-orchestrator --once --issue SAM-12 --codex-canary --preflight
-//	                               → validate the same canary path without
-//	                                 creating a VM or launching an agent
-//	spur-orchestrator --once --codex-canary --preflight
-//	                               → list eligible Codex canary candidates
+//	spur-orchestrator --once --issue SAM-12 --preflight
+//	                               → validate credentials, tracker eligibility,
+//	                                 and Codex app-server without dispatching
+//	spur-orchestrator --once --preflight
+//	                               → list eligible Codex candidates
 //	spur-orchestrator --codex-canary-checklist --issue SAM-12
 //	                               → print the evidence checklist for deciding
-//	                                 whether a Codex canary succeeded
+//	                                 whether a Codex run succeeded
 //	spur-orchestrator --codex-canary-verify-status --issue SAM-12 --status-file /tmp/spur-orchestrator/SAM-12-codex.json
 //	                               → validate machine-readable status evidence
-//	                                 from a Codex canary run
+//	                                 from a Codex run
 //	spur-orchestrator --status-file /tmp/spur-orchestrator/status.json
 //	                               → daemon mode with JSON status snapshots
 //	spur-orchestrator --codex-smoke → check configured Codex app-server protocol
@@ -36,9 +33,9 @@
 //
 //	LINEAR_API_KEY                 → tracker reads
 //	SPUR_HARNESS_GITHUB_TOKEN      → injected into per-VM credentials
-//	SPUR_HARNESS_LINEAR_BOT_TOKEN  → injected into per-VM credentials
-//	                                 (may equal LINEAR_API_KEY if not
-//	                                 using a separate bot account)
+//	SPUR_HARNESS_LINEAR_BOT_TOKEN  → optional fallback for vm_env mode;
+//	                                 production host_proxy mode keeps Linear
+//	                                 credentials on the host
 //	SPUR_HARNESS_SSH_KEY           → path to harness private key
 //	                                 (default: ~/.ssh/spur-agent-vm)
 package main
@@ -60,7 +57,6 @@ import (
 	"time"
 
 	"github.com/sasilver75/events/orchestrator/internal/agent"
-	"github.com/sasilver75/events/orchestrator/internal/agent/claudecode"
 	"github.com/sasilver75/events/orchestrator/internal/agent/codex"
 	"github.com/sasilver75/events/orchestrator/internal/domain"
 	"github.com/sasilver75/events/orchestrator/internal/orchestrator"
@@ -76,11 +72,11 @@ func main() {
 		issue                = flag.String("issue", "", "When --once is set, dispatch only this specific Linear issue identifier (e.g. SAM-12)")
 		validate             = flag.Bool("validate", false, "Validate WORKFLOW.md and exit without running")
 		codexSmoke           = flag.Bool("codex-smoke", false, "Start configured codex app-server, initialize it, and exit")
-		codexCanary          = flag.Bool("codex-canary", false, "With --once, force agent.runner=codex and credentials.linear_access=host_proxy for a targeted canary or preflight")
-		codexCanaryChecklist = flag.Bool("codex-canary-checklist", false, "Print the post-run evidence checklist for a Codex canary and exit")
-		codexCanaryVerify    = flag.Bool("codex-canary-verify-status", false, "Validate a Codex canary status JSON proof file and exit")
+		codexCanary          = flag.Bool("codex-canary", false, "Deprecated no-op; Codex is the production runner")
+		codexCanaryChecklist = flag.Bool("codex-canary-checklist", false, "Print the post-run evidence checklist for a Codex run and exit")
+		codexCanaryVerify    = flag.Bool("codex-canary-verify-status", false, "Validate a Codex status JSON proof file and exit")
 		preflight            = flag.Bool("preflight", false, "Validate credentials, tracker access, target issue eligibility, and Codex handshake without dispatching")
-		statusFile           = flag.String("status-file", "", "Optional path for runtime JSON status snapshots, or canary verifier input")
+		statusFile           = flag.String("status-file", "", "Optional path for runtime JSON status snapshots, or status verifier input")
 		verbose              = flag.Bool("verbose", false, "Log at debug level")
 	)
 	flag.Parse()
@@ -110,10 +106,10 @@ func main() {
 	}
 	if *codexCanaryVerify {
 		if err := verifyCodexCanaryStatusArgs(*issue, *statusFile); err != nil {
-			fatal(logger, "codex canary status verification failed", "err", err)
+			fatal(logger, "codex status verification failed", "err", err)
 		}
 		if err := verifyCodexCanaryStatusFile(*statusFile, *issue, os.Stdout); err != nil {
-			fatal(logger, "codex canary status verification failed", "err", err)
+			fatal(logger, "codex status verification failed", "err", err)
 		}
 		return
 	}
@@ -194,11 +190,6 @@ func main() {
 	}
 	wsManager := tart.New(cfg.Workspace.BaseImage, "admin", sshKey)
 	agentRunner := buildAgentRunner(cfg, wsManager)
-	claudeHarnessDir := os.Getenv("SPUR_HARNESS_CLAUDE_DIR")
-	if claudeHarnessDir == "" {
-		home, _ := os.UserHomeDir()
-		claudeHarnessDir = filepath.Join(home, ".spur", "claude-harness")
-	}
 	codexHarnessDir := os.Getenv("SPUR_HARNESS_CODEX_DIR")
 	worker := &orchestrator.SpurWorker{
 		Workflow:     def,
@@ -207,10 +198,9 @@ func main() {
 		AgentRunner:  agentRunner,
 		DynamicTools: []agent.DynamicTool{tracker.DynamicTool()},
 		HarnessCreds: orchestrator.Credentials{
-			GitHubToken:      githubToken,
-			LinearToken:      linearBotToken,
-			ClaudeHarnessDir: claudeHarnessDir,
-			CodexHarnessDir:  codexHarnessDir,
+			GitHubToken:     githubToken,
+			LinearToken:     linearBotToken,
+			CodexHarnessDir: codexHarnessDir,
 		},
 		Logger: logger,
 	}
@@ -249,23 +239,12 @@ func requireEnv(preferredVar, fallbackVar string) (string, error) {
 }
 
 func buildAgentRunner(cfg workflow.ServiceConfig, wsManager *tart.Manager) agent.ConfigurableRunner {
-	switch cfg.AgentRunnerName() {
-	case "codex":
-		return &codex.Runner{
-			Workspace:    wsManager,
-			Command:      cfg.Codex.Command,
-			TurnTimeout:  time.Duration(cfg.Codex.TurnTimeoutMs) * time.Millisecond,
-			StallTimeout: time.Duration(cfg.Codex.StallTimeoutMs) * time.Millisecond,
-			WorkingDir:   "/Users/admin/events",
-		}
-	default:
-		return &claudecode.Runner{
-			Workspace:    wsManager,
-			Command:      cfg.ClaudeCode.Command,
-			TurnTimeout:  time.Duration(cfg.ClaudeCode.TurnTimeoutMs) * time.Millisecond,
-			StallTimeout: time.Duration(cfg.ClaudeCode.StallTimeoutMs) * time.Millisecond,
-			WorkingDir:   "/Users/admin/events",
-		}
+	return &codex.Runner{
+		Workspace:    wsManager,
+		Command:      cfg.Codex.Command,
+		TurnTimeout:  time.Duration(cfg.Codex.TurnTimeoutMs) * time.Millisecond,
+		StallTimeout: time.Duration(cfg.Codex.StallTimeoutMs) * time.Millisecond,
+		WorkingDir:   "/Users/admin/events",
 	}
 }
 
@@ -273,6 +252,7 @@ func applyCLIConfigOverrides(cfg *workflow.ServiceConfig, codexCanary, once, pre
 	if cfg == nil || !codexCanary {
 		return nil
 	}
+	// Kept for old scripts while Codex moved from canary to production.
 	if !once {
 		return fmt.Errorf("--codex-canary requires --once")
 	}
@@ -387,7 +367,7 @@ func writeCodexCanaryChecklist(out io.Writer, issueIdentifier string) {
 	if issueIdentifier == "" {
 		issueIdentifier = "<SAM-N>"
 	}
-	fmt.Fprintf(out, "Codex canary evidence checklist for %s\n", issueIdentifier)
+	fmt.Fprintf(out, "Codex run evidence checklist for %s\n", issueIdentifier)
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Pre-run gates:")
 	fmt.Fprintf(out, "[ ] Discovery preflight listed %s as eligible.\n", issueIdentifier)
@@ -395,14 +375,14 @@ func writeCodexCanaryChecklist(out io.Writer, issueIdentifier string) {
 	fmt.Fprintln(out, "[ ] Issue preflight printed a Codex app-server user agent, codex_home, platform, and thread_id.")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Run evidence:")
-	fmt.Fprintf(out, "[ ] `spur-orchestrator --once --issue %s --codex-canary --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/%s-codex.json` exited 0.\n", issueIdentifier, issueIdentifier)
+	fmt.Fprintf(out, "[ ] `spur-orchestrator --once --issue %s --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/%s-codex.json` exited 0.\n", issueIdentifier, issueIdentifier)
 	fmt.Fprintf(out, "[ ] `spur-orchestrator --codex-canary-verify-status --issue %s --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/%s-codex.json` exited 0.\n", issueIdentifier, issueIdentifier)
 	fmt.Fprintln(out, "[ ] Logs show `agent_runner=codex`, `linear_access=host_proxy`, `agent session started`, and `agent finished`.")
 	fmt.Fprintf(out, "[ ] Required status file `/tmp/spur-orchestrator/%s-codex.json` exists and contains `agent_runner=codex`, `linear_access=host_proxy`, `recent_runs[0].identifier=%s`, `recent_runs[0].status`, `recent_runs[0].session_id`, `recent_runs[0].thread_id`, `recent_runs[0].turn_id`, `recent_runs[0].token_info`, `recent_runs[0].rate_limits` if Codex emitted them, `codex_totals`, and latest `codex_rate_limits` if Codex emitted them.\n", issueIdentifier, issueIdentifier)
 	fmt.Fprintln(out, "[ ] The issue did not enter `needs_human` due to a successful-continuation loop.")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Linear handoff:")
-	fmt.Fprintln(out, "[ ] Pickup comment exists for the canary attempt.")
+	fmt.Fprintln(out, "[ ] Pickup comment exists for the run attempt.")
 	fmt.Fprintln(out, "[ ] Issue was moved to `In Progress` while work was active.")
 	fmt.Fprintln(out, "[ ] Closeout comment exists with PR link, AC table, drift list, artifacts, and test evidence.")
 	fmt.Fprintln(out, "[ ] Issue state is `In Review` after the PR is opened.")
@@ -413,10 +393,9 @@ func writeCodexCanaryChecklist(out io.Writer, issueIdentifier string) {
 	fmt.Fprintln(out, "[ ] PR body links the Linear issue and includes self-assessment.")
 	fmt.Fprintln(out, "[ ] Required CI/checks are green or failures are explained in the Linear closeout.")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Production-switch decision:")
+	fmt.Fprintln(out, "Credential boundary:")
 	fmt.Fprintln(out, "[ ] No host-held Linear credential leaked into the agent environment.")
 	fmt.Fprintln(out, "[ ] No unsupported Codex app-server request blocked the run.")
-	fmt.Fprintln(out, "[ ] Operator explicitly decides whether to change production defaults to agent.runner=codex and credentials.linear_access=host_proxy.")
 }
 
 func verifyCodexCanaryStatusArgs(issueIdentifier, statusFile string) error {
@@ -483,7 +462,7 @@ func verifyCodexCanaryStatusFile(path, issueIdentifier string, out io.Writer) er
 		return fmt.Errorf("codex_totals.total_tokens=%d is less than run total_tokens=%d", snapshot.CodexTotals.TotalTokens, run.TokenInfo.TotalTokens)
 	}
 
-	fmt.Fprintf(out, "Codex canary status verified: issue=%s status=%s session_id=%s thread_id=%s turn_id=%s tokens=%d runner=%s linear_access=%s\n",
+	fmt.Fprintf(out, "Codex status verified: issue=%s status=%s session_id=%s thread_id=%s turn_id=%s tokens=%d runner=%s linear_access=%s\n",
 		issueIdentifier, run.Status, run.SessionID, run.ThreadID, run.TurnID, run.TokenInfo.TotalTokens, snapshot.AgentRunner, snapshot.LinearAccess)
 	if !hasNonNullJSONField(runRaw, "rate_limits") {
 		fmt.Fprintln(out, "Warning: recent run has no rate_limits; this is acceptable only if Codex did not emit rate-limit telemetry.")

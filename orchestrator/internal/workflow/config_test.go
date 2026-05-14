@@ -21,7 +21,7 @@ func TestNewServiceConfig_AppliesDefaults(t *testing.T) {
 	if cfg.Agent.MaxUnproductiveSuccess != 3 {
 		t.Errorf("Agent.MaxUnproductiveSuccess default = %d", cfg.Agent.MaxUnproductiveSuccess)
 	}
-	if cfg.LinearAccessMode() != "vm_env" {
+	if cfg.LinearAccessMode() != "host_proxy" {
 		t.Errorf("LinearAccessMode default = %q", cfg.LinearAccessMode())
 	}
 	if cfg.Hooks.TimeoutMs != 60000 {
@@ -127,7 +127,7 @@ func TestServiceConfig_Validate(t *testing.T) {
 			want: ErrMissingProjectSlug,
 		},
 		{
-			name: "missing claudecode command",
+			name: "missing codex command",
 			cfg: ServiceConfig{
 				Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
 			},
@@ -136,8 +136,8 @@ func TestServiceConfig_Validate(t *testing.T) {
 		{
 			name: "valid",
 			cfg: ServiceConfig{
-				Tracker:    TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
-				ClaudeCode: ClaudeCodeConfig{Command: "claude --print"},
+				Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
+				Codex:   CodexConfig{Command: "codex app-server"},
 			},
 			want: nil,
 		},
@@ -159,13 +159,13 @@ func TestServiceConfig_Validate(t *testing.T) {
 			want: ErrUnsupportedRunner,
 		},
 		{
-			name: "host proxy requires codex",
+			name: "vm env valid with codex",
 			cfg: ServiceConfig{
 				Tracker:     TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
-				ClaudeCode:  ClaudeCodeConfig{Command: "claude --print"},
-				Credentials: CredentialsConfig{LinearAccess: "host_proxy"},
+				Codex:       CodexConfig{Command: "codex app-server"},
+				Credentials: CredentialsConfig{LinearAccess: "vm_env"},
 			},
-			want: ErrUnsupportedLinearAccess,
+			want: nil,
 		},
 		{
 			name: "host proxy valid with codex",
@@ -181,7 +181,7 @@ func TestServiceConfig_Validate(t *testing.T) {
 			name: "unknown linear access mode",
 			cfg: ServiceConfig{
 				Tracker:     TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
-				ClaudeCode:  ClaudeCodeConfig{Command: "claude --print"},
+				Codex:       CodexConfig{Command: "codex app-server"},
 				Credentials: CredentialsConfig{LinearAccess: "direct"},
 			},
 			want: ErrUnsupportedLinearAccess,

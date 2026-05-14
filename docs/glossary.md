@@ -208,8 +208,8 @@ the right length — link out for depth.
 - **SPM** — Swift Package Manager. Apple's dependency manager for
   Swift, used to pull in MapLibre and supabase-swift.
 
-- **swift-format** — Apple's official Swift formatter. Run as both a
-  Claude Code PostToolUse hook and a git pre-commit hook. CI runs it
+- **swift-format** — Apple's official Swift formatter. Run as a
+  git pre-commit hook. CI runs it
   in `--strict` mode, which catches naming-convention issues
   (e.g. `user_id` → `userID`) that the format-only mode doesn't.
 

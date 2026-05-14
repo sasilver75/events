@@ -27,7 +27,7 @@ Bypass with `git push --no-verify` when you know what you're doing.
 silent prompt, avoiding shell history. It defaults to macOS Keychain and also
 supports a chmod-600 `~/.spur/env` fallback with `--env-file`.
 
-`spur-codex-canary` wraps the explicit Codex proof sequence:
+`spur-codex-canary` is a backwards-compatible Codex readiness/run wrapper:
 
 ```sh
 scripts/spur-snapshot-codex.sh
@@ -40,7 +40,7 @@ scripts/spur-codex-canary verify SAM-12
 scripts/spur-codex-canary checklist SAM-12
 ```
 
-The canary status file defaults to
+The status file defaults to
 `/tmp/spur-orchestrator/<SAM-id>-codex.json`. If
 `~/.spur/codex-harness` exists, `spur-codex-canary` exports it as
 `SPUR_HARNESS_CODEX_DIR` for discovery, preflight, and run commands. The

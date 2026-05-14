@@ -26,14 +26,14 @@ Usage: scripts/spur-agent <SAM-id>
 Dispatches one Linear issue through the agent harness:
   1. clones spur-base into a per-issue Tart VM
   2. runs the after_create / before_run hooks from WORKFLOW.md
-  3. launches Claude Code inside the VM with the rendered prompt
+  3. launches Codex app-server inside the VM with the rendered prompt
   4. runs the after_run hook
   5. leaves the VM stopped for inspection (run --shutdown to clean up)
 
 Required env vars (also documented in orchestrator/cmd/spur-orchestrator/main.go):
   LINEAR_API_KEY                  Linear API key for tracker reads
   SPUR_HARNESS_GITHUB_TOKEN       Fine-grained GitHub PAT scoped to sasilver75/events
-  SPUR_HARNESS_LINEAR_BOT_TOKEN   Linear API key for the bot account (may equal LINEAR_API_KEY)
+  SPUR_HARNESS_LINEAR_BOT_TOKEN   Optional fallback for vm_env mode
   SPUR_HARNESS_SSH_KEY            Path to harness SSH key (default ~/.ssh/spur-agent-vm)
 EOF
 }

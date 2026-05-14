@@ -17,8 +17,8 @@ import (
 
 func TestApplyCLIConfigOverridesCodexCanary(t *testing.T) {
 	cfg := workflow.ServiceConfig{
-		Agent:       workflow.AgentConfig{Runner: "claudecode"},
-		Credentials: workflow.CredentialsConfig{LinearAccess: "vm_env"},
+		Agent:       workflow.AgentConfig{Runner: "codex"},
+		Credentials: workflow.CredentialsConfig{LinearAccess: "host_proxy"},
 	}
 
 	if err := applyCLIConfigOverrides(&cfg, true, true, false, "SAM-12"); err != nil {
@@ -71,16 +71,16 @@ func TestApplyCLIConfigOverridesCodexCanaryRequiresOneIssue(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := workflow.ServiceConfig{
-				Agent:       workflow.AgentConfig{Runner: "claudecode"},
-				Credentials: workflow.CredentialsConfig{LinearAccess: "vm_env"},
+				Agent:       workflow.AgentConfig{Runner: "codex"},
+				Credentials: workflow.CredentialsConfig{LinearAccess: "host_proxy"},
 			}
 			if err := applyCLIConfigOverrides(&cfg, true, tt.once, tt.preflight, tt.issue); err == nil {
 				t.Fatal("expected error")
 			}
-			if cfg.Agent.Runner != "claudecode" {
+			if cfg.Agent.Runner != "codex" {
 				t.Fatalf("runner changed to %q", cfg.Agent.Runner)
 			}
-			if cfg.Credentials.LinearAccess != "vm_env" {
+			if cfg.Credentials.LinearAccess != "host_proxy" {
 				t.Fatalf("linear access changed to %q", cfg.Credentials.LinearAccess)
 			}
 		})
@@ -89,8 +89,8 @@ func TestApplyCLIConfigOverridesCodexCanaryRequiresOneIssue(t *testing.T) {
 
 func TestApplyCLIConfigOverridesCodexCanaryAllowsPreflightWithoutIssue(t *testing.T) {
 	cfg := workflow.ServiceConfig{
-		Agent:       workflow.AgentConfig{Runner: "claudecode"},
-		Credentials: workflow.CredentialsConfig{LinearAccess: "vm_env"},
+		Agent:       workflow.AgentConfig{Runner: "codex"},
+		Credentials: workflow.CredentialsConfig{LinearAccess: "host_proxy"},
 	}
 
 	if err := applyCLIConfigOverrides(&cfg, true, true, true, ""); err != nil {
@@ -106,18 +106,18 @@ func TestApplyCLIConfigOverridesCodexCanaryAllowsPreflightWithoutIssue(t *testin
 
 func TestApplyCLIConfigOverridesNoop(t *testing.T) {
 	cfg := workflow.ServiceConfig{
-		Agent:       workflow.AgentConfig{Runner: "claudecode"},
-		Credentials: workflow.CredentialsConfig{LinearAccess: "vm_env"},
+		Agent:       workflow.AgentConfig{Runner: "codex"},
+		Credentials: workflow.CredentialsConfig{LinearAccess: "host_proxy"},
 	}
 
 	if err := applyCLIConfigOverrides(&cfg, false, false, false, ""); err != nil {
 		t.Fatalf("applyCLIConfigOverrides returned error: %v", err)
 	}
-	if cfg.Agent.Runner != "claudecode" {
-		t.Fatalf("runner = %q, want claudecode", cfg.Agent.Runner)
+	if cfg.Agent.Runner != "codex" {
+		t.Fatalf("runner = %q, want codex", cfg.Agent.Runner)
 	}
-	if cfg.Credentials.LinearAccess != "vm_env" {
-		t.Fatalf("linear access = %q, want vm_env", cfg.Credentials.LinearAccess)
+	if cfg.Credentials.LinearAccess != "host_proxy" {
+		t.Fatalf("linear access = %q, want host_proxy", cfg.Credentials.LinearAccess)
 	}
 }
 
@@ -217,7 +217,7 @@ func TestRunPreflightListsCandidateIssues(t *testing.T) {
 	tracker := fakePreflightTracker{
 		issues: []domain.Issue{
 			{ID: "uuid-2", Identifier: "SAM-2", Title: "Needs AFK", State: "Ready"},
-			{ID: "uuid-12", Identifier: "SAM-12", Title: "Codex canary", State: "Ready", Labels: []string{"afk"}},
+			{ID: "uuid-12", Identifier: "SAM-12", Title: "Codex run", State: "Ready", Labels: []string{"afk"}},
 		},
 	}
 	cfg := workflow.ServiceConfig{
@@ -235,7 +235,7 @@ func TestRunPreflightListsCandidateIssues(t *testing.T) {
 		"candidates=2 eligible=1 rejected=1",
 		"runner=codex linear_access=host_proxy",
 		"Eligible issues:",
-		"- SAM-12 [Ready] Codex canary",
+		"- SAM-12 [Ready] Codex run",
 		"Rejected active candidates:",
 		"- SAM-2: missing_required_label:afk",
 	} {
@@ -294,13 +294,13 @@ func TestWriteCodexCanaryChecklistUsesIssueIdentifier(t *testing.T) {
 
 	got := out.String()
 	for _, want := range []string{
-		"Codex canary evidence checklist for SAM-12",
+		"Codex run evidence checklist for SAM-12",
 		"Discovery preflight listed SAM-12 as eligible.",
-		"`spur-orchestrator --once --issue SAM-12 --codex-canary --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/SAM-12-codex.json` exited 0.",
+		"`spur-orchestrator --once --issue SAM-12 --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/SAM-12-codex.json` exited 0.",
 		"`spur-orchestrator --codex-canary-verify-status --issue SAM-12 --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/SAM-12-codex.json` exited 0.",
 		"Required status file `/tmp/spur-orchestrator/SAM-12-codex.json` exists and contains `agent_runner=codex`, `linear_access=host_proxy`, `recent_runs[0].identifier=SAM-12`, `recent_runs[0].status`, `recent_runs[0].session_id`, `recent_runs[0].thread_id`, `recent_runs[0].turn_id`, `recent_runs[0].token_info`, `recent_runs[0].rate_limits`",
 		"Issue state is `In Review`",
-		"agent.runner=codex and credentials.linear_access=host_proxy",
+		"No host-held Linear credential leaked",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("checklist missing %q:\n%s", want, got)
@@ -313,7 +313,7 @@ func TestWriteCodexCanaryChecklistUsesPlaceholder(t *testing.T) {
 
 	writeCodexCanaryChecklist(&out, "")
 
-	if got := out.String(); !strings.Contains(got, "Codex canary evidence checklist for <SAM-N>") {
+	if got := out.String(); !strings.Contains(got, "Codex run evidence checklist for <SAM-N>") {
 		t.Fatalf("checklist missing placeholder:\n%s", got)
 	}
 }
@@ -339,7 +339,7 @@ func TestVerifyCodexCanaryStatusFilePasses(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{
-		"Codex canary status verified",
+		"Codex status verified",
 		"issue=SAM-12",
 		"session_id=thread-123",
 		"thread_id=thread-123",
@@ -363,7 +363,7 @@ func TestVerifyCodexCanaryStatusFileRejectsWrongRunnerAndAccess(t *testing.T) {
 		{
 			name: "wrong runner",
 			mutate: func(status map[string]any) {
-				status["agent_runner"] = "claudecode"
+				status["agent_runner"] = "other"
 			},
 			wantErr: "agent_runner",
 		},

@@ -39,10 +39,8 @@ brew install \
 # failure doesn't take down the rest of the install batch.
 brew install supabase/tap/supabase
 
-echo "==> Installing Claude Code via npm"
-# Anthropic publishes Claude Code as @anthropic-ai/claude-code on npm.
-# It pulls a self-contained binary on first launch.
-npm install -g @anthropic-ai/claude-code
+echo "==> Installing Codex CLI via npm"
+npm install -g @openai/codex@latest
 
 echo "==> Trusting github.com host key"
 mkdir -p ~/.ssh
@@ -50,12 +48,6 @@ chmod 700 ~/.ssh
 ssh-keyscan -t ed25519,rsa github.com 2>/dev/null >> ~/.ssh/known_hosts
 sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
 chmod 600 ~/.ssh/known_hosts
-
-echo "==> Seeding Claude Code settings (bypassPermissions inside VM only)"
-# Use printf, not a heredoc. The bootstrap script pipes this whole file
-# into `bash -s` over SSH, and nested heredocs trip the parser there.
-mkdir -p "$HOME/.claude"
-printf '%s\n' '{"permissions":{"defaultMode":"bypassPermissions"}}' > "$HOME/.claude/settings.json"
 
 echo "==> Versions installed"
 printf "  go:       %s\n" "$(go version 2>/dev/null | awk '{print $3}')"
@@ -65,7 +57,7 @@ printf "  npm:      %s\n" "$(npm --version 2>/dev/null)"
 printf "  colima:   %s\n" "$(colima version 2>/dev/null | head -1)"
 printf "  docker:   %s\n" "$(docker --version 2>/dev/null)"
 printf "  supabase: %s\n" "$(supabase --version 2>/dev/null)"
-printf "  claude:   %s\n" "$(claude --version 2>/dev/null || echo 'unknown')"
+printf "  codex:    %s\n" "$(codex --version 2>/dev/null || echo 'unknown')"
 printf "  xcode:    %s\n" "$(xcodebuild -version 2>/dev/null | head -1)"
 
 echo "==> spur-base in-VM bootstrap complete"

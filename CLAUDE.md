@@ -97,7 +97,7 @@ Use `/tdd` for non-trivial features: red → green → refactor.
 
 ## Multi-session coordination
 
-Two Claude Code sessions can run in parallel against different worktrees.
+Two agent sessions can run in parallel against different worktrees.
 Without partitioning, they will clobber each other's iOS simulator state and
 build artifacts. Rules:
 

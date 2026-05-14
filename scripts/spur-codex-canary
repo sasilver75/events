@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# spur-codex-canary - explicit operator wrapper for the Codex canary path.
+# spur-codex-canary - backwards-compatible wrapper for Codex harness checks.
 
 set -euo pipefail
 
@@ -145,7 +145,7 @@ doctor() {
   return "$ok"
 }
 
-prepare_canary_env() {
+prepare_codex_env() {
   load_env_file_if_present
   load_keychain_credentials_if_needed
   use_default_codex_harness_if_present
@@ -168,21 +168,21 @@ case "$cmd" in
     ;;
   discover)
     build_if_needed
-    prepare_canary_env
-    exec "$ORCHESTRATOR_BIN" --workflow "$WORKFLOW_PATH" --once --codex-canary --preflight
+    prepare_codex_env
+    exec "$ORCHESTRATOR_BIN" --workflow "$WORKFLOW_PATH" --once --preflight
     ;;
   preflight)
     issue_required "$@"
     build_if_needed
-    prepare_canary_env
-    exec "$ORCHESTRATOR_BIN" --workflow "$WORKFLOW_PATH" --once --issue "$1" --codex-canary --preflight
+    prepare_codex_env
+    exec "$ORCHESTRATOR_BIN" --workflow "$WORKFLOW_PATH" --once --issue "$1" --preflight
     ;;
   run)
     issue_required "$@"
     build_if_needed
-    prepare_canary_env
+    prepare_codex_env
     status_file="$(status_file_for "$1" "${2:-}")"
-    exec "$ORCHESTRATOR_BIN" --workflow "$WORKFLOW_PATH" --once --issue "$1" --codex-canary --status-file "$status_file"
+    exec "$ORCHESTRATOR_BIN" --workflow "$WORKFLOW_PATH" --once --issue "$1" --status-file "$status_file"
     ;;
   verify)
     issue_required "$@"

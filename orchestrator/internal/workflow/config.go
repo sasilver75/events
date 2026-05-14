@@ -19,7 +19,6 @@ type ServiceConfig struct {
 	Hooks       HooksConfig
 	Agent       AgentConfig
 	Credentials CredentialsConfig
-	ClaudeCode  ClaudeCodeConfig
 	Codex       CodexConfig
 }
 
@@ -61,7 +60,7 @@ type AgentConfig struct {
 	MaxTurns               int
 	MaxRetryBackoffMs      int
 	MaxUnproductiveSuccess int
-	Runner                 string // "claudecode" today, "codex" when explicitly selected
+	Runner                 string // currently only "codex" is supported
 }
 
 // CredentialsConfig is a Spur extension that makes the current secret boundary
@@ -71,18 +70,7 @@ type CredentialsConfig struct {
 	LinearAccess string
 }
 
-// ClaudeCodeConfig is the Spur substitution for spec §5.3.6 `codex`.
-// Spur runs Claude Code in headless mode inside per-issue VMs.
-type ClaudeCodeConfig struct {
-	Command        string
-	TurnTimeoutMs  int
-	ReadTimeoutMs  int
-	StallTimeoutMs int
-}
-
 // CodexConfig is the typed view of Symphony's reference `codex` section.
-// Spur parses it now so Codex can be introduced alongside Claude Code without
-// changing the rest of the workflow schema.
 type CodexConfig struct {
 	Command        string
 	TurnTimeoutMs  int
@@ -96,7 +84,7 @@ var (
 	ErrUnsupportedRunner       = errors.New("unsupported_agent_runner")
 	ErrMissingTrackerKind      = errors.New("missing_tracker_kind")
 	ErrMissingProjectSlug      = errors.New("missing_tracker_project_slug")
-	ErrMissingCodexCommand     = errors.New("missing_claudecode_command")
+	ErrMissingCodexCommand     = errors.New("missing_codex_command")
 	ErrUnsupportedLinearAccess = errors.New("unsupported_linear_access_mode")
 )
 
@@ -118,15 +106,9 @@ func NewServiceConfig(raw map[string]any) ServiceConfig {
 			MaxTurns:               20,
 			MaxRetryBackoffMs:      300000,
 			MaxUnproductiveSuccess: 3,
-			Runner:                 "claudecode",
+			Runner:                 "codex",
 		},
-		Credentials: CredentialsConfig{LinearAccess: "vm_env"},
-		ClaudeCode: ClaudeCodeConfig{
-			Command:        "claude --print --output-format=stream-json --permission-mode bypassPermissions",
-			TurnTimeoutMs:  3600000,
-			ReadTimeoutMs:  5000,
-			StallTimeoutMs: 300000,
-		},
+		Credentials: CredentialsConfig{LinearAccess: "host_proxy"},
 		Codex: CodexConfig{
 			Command:        "codex app-server",
 			TurnTimeoutMs:  3600000,
@@ -197,21 +179,6 @@ func NewServiceConfig(raw map[string]any) ServiceConfig {
 		}
 	}
 
-	if c, ok := raw["claudecode"].(map[string]any); ok {
-		if v := stringField(c, "command"); v != "" {
-			cfg.ClaudeCode.Command = v
-		}
-		if v := intField(c, "turn_timeout_ms"); v > 0 {
-			cfg.ClaudeCode.TurnTimeoutMs = v
-		}
-		if v := intField(c, "read_timeout_ms"); v > 0 {
-			cfg.ClaudeCode.ReadTimeoutMs = v
-		}
-		if v := intField(c, "stall_timeout_ms"); v > 0 {
-			cfg.ClaudeCode.StallTimeoutMs = v
-		}
-	}
-
 	if c, ok := raw["codex"].(map[string]any); ok {
 		if v := stringField(c, "command"); v != "" {
 			cfg.Codex.Command = v
@@ -244,17 +211,10 @@ func (c ServiceConfig) Validate() error {
 	switch c.LinearAccessMode() {
 	case "vm_env":
 	case "host_proxy":
-		if c.AgentRunnerName() != "codex" {
-			return fmt.Errorf("%w: %q requires agent.runner=codex", ErrUnsupportedLinearAccess, c.Credentials.LinearAccess)
-		}
 	default:
 		return fmt.Errorf("%w: %q", ErrUnsupportedLinearAccess, c.Credentials.LinearAccess)
 	}
 	switch c.AgentRunnerName() {
-	case "claudecode":
-		if c.ClaudeCode.Command == "" {
-			return ErrMissingCodexCommand
-		}
 	case "codex":
 		if c.Codex.Command == "" {
 			return ErrMissingCodexCommand
@@ -266,36 +226,27 @@ func (c ServiceConfig) Validate() error {
 }
 
 func (c ServiceConfig) AgentCommand() string {
-	if c.AgentRunnerName() == "codex" {
-		return c.Codex.Command
-	}
-	return c.ClaudeCode.Command
+	return c.Codex.Command
 }
 
 func (c ServiceConfig) AgentTurnTimeoutMs() int {
-	if c.AgentRunnerName() == "codex" {
-		return c.Codex.TurnTimeoutMs
-	}
-	return c.ClaudeCode.TurnTimeoutMs
+	return c.Codex.TurnTimeoutMs
 }
 
 func (c ServiceConfig) AgentStallTimeoutMs() int {
-	if c.AgentRunnerName() == "codex" {
-		return c.Codex.StallTimeoutMs
-	}
-	return c.ClaudeCode.StallTimeoutMs
+	return c.Codex.StallTimeoutMs
 }
 
 func (c ServiceConfig) AgentRunnerName() string {
 	if c.Agent.Runner == "" {
-		return "claudecode"
+		return "codex"
 	}
 	return c.Agent.Runner
 }
 
 func (c ServiceConfig) LinearAccessMode() string {
 	if c.Credentials.LinearAccess == "" {
-		return "vm_env"
+		return "host_proxy"
 	}
 	return c.Credentials.LinearAccess
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Snapshot host-level Codex state into ~/.spur/codex-harness/ for optional
-# shipment into per-issue Tart VMs during Codex canaries.
+# shipment into per-issue Tart VMs.
 #
 # Deliberately excluded: logs, sessions/history, SQLite log/state DBs,
 # temporary files, shell snapshots, and computer-use artifacts.
@@ -52,4 +52,4 @@ else
 fi
 
 echo
-echo "Set SPUR_HARNESS_CODEX_DIR=$DEST before a Codex canary to ship it into the VM."
+echo "Set SPUR_HARNESS_CODEX_DIR=$DEST before running the harness to ship it into the VM."

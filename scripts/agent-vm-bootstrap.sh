@@ -39,7 +39,7 @@ Usage: scripts/agent-vm-bootstrap.sh [--rebuild]
 
 Builds the spur-base Tart VM by cloning the cirruslabs Tahoe+Xcode image,
 installing the harness SSH key, then running the Spur toolchain installer
-(Go, Supabase CLI, colima, gh, Claude Code) inside the VM.
+(Go, Supabase CLI, colima, gh, Codex CLI) inside the VM.
 
   --rebuild   Delete the existing spur-base VM and start fresh from the
               OCI image. Use this when the in-VM bootstrap has diverged

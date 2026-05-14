@@ -58,13 +58,12 @@ if [ ! -f "$IOS_TEMPLATE" ]; then
   exit 1
 fi
 
-# A worktree may live either at the main repo root (.../events) or under
-# .claude/worktrees/<name>. Discover all .spur-services pins under the same
-# .claude/worktrees/ directory and the main repo root, and collect taken
-# offsets so we don't pick a duplicate.
+# A worktree may live either at the main repo root (.../events) or under an
+# agent worktrees directory. Discover sibling .spur-services pins and collect
+# taken offsets so we don't pick a duplicate.
 WORKTREES_DIR=""
 case "$ROOT" in
-  */.claude/worktrees/*) WORKTREES_DIR="$(cd "$ROOT/.." && pwd)" ;;
+  */.codex/worktrees/*|*/.worktrees/*) WORKTREES_DIR="$(cd "$ROOT/.." && pwd)" ;;
 esac
 
 declare -a TAKEN_OFFSETS=()

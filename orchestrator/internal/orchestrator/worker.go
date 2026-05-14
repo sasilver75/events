@@ -51,10 +51,9 @@ type SpurWorker struct {
 // Credentials are injected into per-issue VMs at run time. See
 // docs/agents/harness.md §Credentials.
 type Credentials struct {
-	GitHubToken      string
-	LinearToken      string
-	ClaudeHarnessDir string // host path to the harness identity's ~/.claude/ snapshot
-	CodexHarnessDir  string // optional host path to a filtered ~/.codex/ snapshot
+	GitHubToken     string
+	LinearToken     string
+	CodexHarnessDir string // optional host path to a filtered ~/.codex/ snapshot
 }
 
 // Run executes one full ticket lifecycle and returns a WorkerResult.
@@ -82,17 +81,16 @@ func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, 
 	}
 
 	hookEnv := tart.HookEnv{
-		VMName:           workspace.Path,
-		VMIP:             vmIP,
-		IssueID:          issue.ID,
-		IssueIdentifier:  issue.Identifier,
-		IssueJSON:        string(issueJSON),
-		GitHubToken:      w.HarnessCreds.GitHubToken,
-		LinearToken:      linearToken,
-		RunLogDir:        runLogDir,
-		SSHKey:           w.WorkspaceMgr.SSHKey,
-		HarnessClaudeDir: w.HarnessCreds.ClaudeHarnessDir,
-		HarnessCodexDir:  w.HarnessCreds.CodexHarnessDir,
+		VMName:          workspace.Path,
+		VMIP:            vmIP,
+		IssueID:         issue.ID,
+		IssueIdentifier: issue.Identifier,
+		IssueJSON:       string(issueJSON),
+		GitHubToken:     w.HarnessCreds.GitHubToken,
+		LinearToken:     linearToken,
+		RunLogDir:       runLogDir,
+		SSHKey:          w.WorkspaceMgr.SSHKey,
+		HarnessCodexDir: w.HarnessCreds.CodexHarnessDir,
 	}
 
 	// 2. after_create (only on first creation).
@@ -190,17 +188,16 @@ func (w *SpurWorker) Cleanup(ctx context.Context, issue domain.Issue) error {
 		linearToken = ""
 	}
 	hookEnv := tart.HookEnv{
-		VMName:           workspace.Path,
-		VMIP:             vmIP,
-		IssueID:          issue.ID,
-		IssueIdentifier:  issue.Identifier,
-		IssueJSON:        string(issueJSON),
-		GitHubToken:      w.HarnessCreds.GitHubToken,
-		LinearToken:      linearToken,
-		RunLogDir:        w.runLogDirFor(issue, nil),
-		SSHKey:           w.WorkspaceMgr.SSHKey,
-		HarnessClaudeDir: w.HarnessCreds.ClaudeHarnessDir,
-		HarnessCodexDir:  w.HarnessCreds.CodexHarnessDir,
+		VMName:          workspace.Path,
+		VMIP:            vmIP,
+		IssueID:         issue.ID,
+		IssueIdentifier: issue.Identifier,
+		IssueJSON:       string(issueJSON),
+		GitHubToken:     w.HarnessCreds.GitHubToken,
+		LinearToken:     linearToken,
+		RunLogDir:       w.runLogDirFor(issue, nil),
+		SSHKey:          w.WorkspaceMgr.SSHKey,
+		HarnessCodexDir: w.HarnessCreds.CodexHarnessDir,
 	}
 
 	hookTimeout := time.Duration(cfg.Hooks.TimeoutMs) * time.Millisecond

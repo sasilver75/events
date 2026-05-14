@@ -1,6 +1,6 @@
 // Package agent defines the runner contract shared by concrete coding-agent
-// integrations. Symphony's reference runtime is Codex app-server; Spur's
-// current production runtime is Claude Code headless.
+// integrations. Symphony's reference runtime is Codex app-server; Spur uses
+// that protocol as its production runner.
 package agent
 
 import (

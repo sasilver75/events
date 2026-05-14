@@ -29,8 +29,7 @@ hooks:
   # Hooks run on the host with these env vars available:
   #   SPUR_VM_NAME, SPUR_VM_IP, SPUR_ISSUE_ID, SPUR_ISSUE_IDENTIFIER,
   #   SPUR_ISSUE_JSON, SPUR_GITHUB_TOKEN, SPUR_LINEAR_TOKEN,
-  #   SPUR_RUN_LOG_DIR, SPUR_SSH_KEY, SPUR_HARNESS_CLAUDE_DIR,
-  #   SPUR_HARNESS_CODEX_DIR
+  #   SPUR_RUN_LOG_DIR, SPUR_SSH_KEY, SPUR_HARNESS_CODEX_DIR
   #
   # SSH connections always pass -i "$SPUR_SSH_KEY" so the harness key is used
   # explicitly (not whatever default key the host happens to have).
@@ -62,43 +61,18 @@ hooks:
     # snapshot, and optional agent identity snapshots.
     SSH_OPTS=(-i "$SPUR_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 
-    # 1. Ship the harness ~/.claude/ snapshot into the VM (replaces any
-    #    leftover state from a prior attempt). The snapshot is a filtered
-    #    copy of host ~/.claude/ plus an extracted .credentials.json
-    #    (see scripts/spur-snapshot-claude.sh).
-    if [ -d "$SPUR_HARNESS_CLAUDE_DIR" ]; then
-      ssh "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP" 'rm -rf ~/.claude && mkdir -p ~/.claude && chmod 700 ~/.claude'
-      scp -r "${SSH_OPTS[@]}" "$SPUR_HARNESS_CLAUDE_DIR"/. admin@"$SPUR_VM_IP":'~/.claude/'
-      # Belt-and-suspenders: also inject the credential into the VM's
-      # Keychain. Claude Code on macOS prefers Keychain over .credentials.json
-      # when both are present, so this is the canonical path. The file in
-      # ~/.claude/.credentials.json is the fallback in case Keychain is
-      # locked or unavailable.
-      ssh "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP" 'bash -s' <<'EOS'
-    set -eu
-    if [ -f "$HOME/.claude/.credentials.json" ]; then
-      CRED="$(cat "$HOME/.claude/.credentials.json")"
-      security add-generic-password \
-        -a admin -s "Claude Code-credentials" \
-        -w "$CRED" -U 2>/dev/null || \
-        security add-generic-password \
-          -a admin -s "Claude Code-credentials" -w "$CRED"
-    fi
-    EOS
-    fi
-
-    # 2. Optionally ship a filtered ~/.codex/ snapshot into the VM for Codex
-    #    canary runs. Leave SPUR_HARNESS_CODEX_DIR empty to rely on whatever
-    #    Codex identity already exists in the VM.
+    # 1. Optionally ship a filtered ~/.codex/ snapshot into the VM. Leave
+    #    SPUR_HARNESS_CODEX_DIR empty to rely on whatever Codex identity
+    #    already exists in the VM.
     if [ -n "${SPUR_HARNESS_CODEX_DIR:-}" ] && [ -d "$SPUR_HARNESS_CODEX_DIR" ]; then
       ssh "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP" 'rm -rf ~/.codex && mkdir -p ~/.codex && chmod 700 ~/.codex'
       scp -r "${SSH_OPTS[@]}" "$SPUR_HARNESS_CODEX_DIR"/. admin@"$SPUR_VM_IP":'~/.codex/'
     fi
 
-    # 3. Write the issue snapshot to /tmp inside the VM.
+    # 2. Write the issue snapshot to /tmp inside the VM.
     printf '%s' "$SPUR_ISSUE_JSON" | ssh "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP" 'cat > /tmp/issue.json'
 
-    # 4. Refresh the git remote URL with the current PAT (in case the
+    # 3. Refresh the git remote URL with the current PAT (in case the
     #    token was rotated between runs) and write the credentials.env
     #    file for any agent tooling that reads it. In host_proxy mode
     #    SPUR_LINEAR_TOKEN is intentionally empty; Codex uses the host-side
@@ -123,7 +97,6 @@ hooks:
     # Runs after each agent attempt (success, failure, timeout, cancel).
     SSH_OPTS=(-i "$SPUR_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
     mkdir -p "$SPUR_RUN_LOG_DIR"
-    scp -r "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP":'~/.claude/projects' "$SPUR_RUN_LOG_DIR/claude-projects" 2>/dev/null || true
     scp -r "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP":'~/.codex/log' "$SPUR_RUN_LOG_DIR/codex-log" 2>/dev/null || true
     scp "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP":'/tmp/issue.json' "$SPUR_RUN_LOG_DIR/issue.json" 2>/dev/null || true
 
@@ -136,10 +109,7 @@ hooks:
   timeout_ms: 600000
 
 agent:
-  # Current production runner. `codex` is scaffolded behind the same runner
-  # interface with a minimal app-server protocol client, but Claude Code stays
-  # the default until the Codex path is exercised on real issues.
-  runner: claudecode
+  runner: codex
   # Capped at 2 by Apple's macOS-guest license. Raising past 2 will be
   # silently ignored by the host (the 3rd boot will fail).
   max_concurrent_agents: 2
@@ -151,16 +121,12 @@ agent:
   max_unproductive_successes: 3
 
 credentials:
-  # Current production mode. Linear credentials are injected into the VM as
-  # LINEAR_API_KEY for the agent's CLI/API calls. `host_proxy` is implemented
-  # only for agent.runner=codex, where Linear calls go through the host-side
-  # linear_graphql dynamic tool.
-  linear_access: vm_env
+  # Keep the Linear token on the host. Codex receives a constrained
+  # host-side linear_graphql dynamic tool instead of raw tracker credentials.
+  linear_access: host_proxy
 
-claudecode:
-  # Spur-specific section (Symphony spec uses `codex`; we substitute Claude Code).
-  # --verbose is required when --output-format=stream-json is used with --print.
-  command: claude --print --verbose --output-format=stream-json --permission-mode bypassPermissions
+codex:
+  command: codex app-server
   turn_timeout_ms: 3600000
   read_timeout_ms: 5000
   stall_timeout_ms: 600000
