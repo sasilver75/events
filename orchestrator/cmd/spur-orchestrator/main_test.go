@@ -134,6 +134,29 @@ func TestValidatePreflightCredentialsRequiresGitHubToken(t *testing.T) {
 	}
 }
 
+func TestValidateWorkflowConfigForModeAllowsOfflineStatusVerificationWithoutLinearKey(t *testing.T) {
+	t.Setenv("SPUR_TEST_LINEAR_KEY", "")
+	t.Setenv("LINEAR_API_KEY", "")
+	cfg := workflow.ServiceConfig{
+		Tracker: workflow.TrackerConfig{
+			Kind:        "linear",
+			ProjectSlug: "spur",
+			APIKeyEnv:   "SPUR_TEST_LINEAR_KEY",
+		},
+		Agent:       workflow.AgentConfig{Runner: "codex"},
+		Codex:       workflow.CodexConfig{Command: "codex app-server"},
+		Credentials: workflow.CredentialsConfig{LinearAccess: "host_proxy"},
+	}
+
+	if err := validateWorkflowConfigForMode(cfg, true); err != nil {
+		t.Fatalf("offline verify validation returned error: %v", err)
+	}
+	err := validateWorkflowConfigForMode(cfg, false)
+	if err == nil || !strings.Contains(err.Error(), "missing_tracker_api_key") {
+		t.Fatalf("normal validation error = %v, want missing tracker API key", err)
+	}
+}
+
 func TestValidatePreflightLocalReadinessForIssueReportsRunInputs(t *testing.T) {
 	t.Setenv("SPUR_TEST_LINEAR_KEY", "")
 	t.Setenv("LINEAR_API_KEY", "")

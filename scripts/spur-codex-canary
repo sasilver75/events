@@ -31,6 +31,9 @@ Required env or Keychain entries for preflight/run:
   SPUR_HARNESS_GITHUB_TOKEN or ~/.spur/env or Keychain item spur-harness-github-token
   SPUR_HARNESS_SSH_KEY (defaults to ~/.ssh/spur-agent-vm)
   SPUR_HARNESS_CODEX_DIR (optional; defaults to ~/.spur/codex-harness when it exists)
+
+Verify mode reads only the local status file and does not require Linear env,
+~/.spur/env, or Keychain credentials.
 EOF
 }
 

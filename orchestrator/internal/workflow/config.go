@@ -227,6 +227,19 @@ func NewServiceConfig(raw map[string]any) ServiceConfig {
 
 // Validate runs the dispatch preflight checks from spec §6.3.
 func (c ServiceConfig) Validate() error {
+	if err := c.ValidateWithoutTrackerAPIKey(); err != nil {
+		return err
+	}
+	if _, err := c.ResolveTrackerAPIKey(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ValidateWithoutTrackerAPIKey validates static workflow configuration without
+// resolving live tracker credentials. This is only appropriate for local,
+// offline commands that do not contact Linear.
+func (c ServiceConfig) ValidateWithoutTrackerAPIKey() error {
 	if c.Tracker.Kind == "" {
 		return ErrMissingTrackerKind
 	}
@@ -249,9 +262,6 @@ func (c ServiceConfig) Validate() error {
 		}
 	default:
 		return fmt.Errorf("%w: %q", ErrUnsupportedRunner, c.Agent.Runner)
-	}
-	if _, err := c.ResolveTrackerAPIKey(); err != nil {
-		return err
 	}
 	return nil
 }
