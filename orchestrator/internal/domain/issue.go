@@ -32,6 +32,7 @@ type Issue struct {
 	State       string
 	BranchName  string
 	URL         string
+	AssigneeID  string
 
 	// Labels are normalized to lowercase by the tracker adapter
 	// (spec §11.3). The orchestrator and agent runner can compare

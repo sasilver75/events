@@ -71,3 +71,60 @@ func TestEligibilityFilter_SpurDefault(t *testing.T) {
 		})
 	}
 }
+
+func TestEligibilityFilter_AssigneeCriterion(t *testing.T) {
+	t.Parallel()
+	filter := SpurDefault
+	filter.CurrentUserID = "user-current"
+
+	cases := []struct {
+		name       string
+		assigneeID string
+		want       bool
+		reason     string
+	}{
+		{
+			name: "unassigned",
+			want: true,
+		},
+		{
+			name:       "assigned to current user",
+			assigneeID: "user-current",
+			want:       true,
+		},
+		{
+			name:       "assigned to another user",
+			assigneeID: "user-other",
+			want:       false,
+			reason:     "assigned_to_other:user-other",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			issue := domain.Issue{Identifier: "SAM-1", Labels: []string{"afk"}, AssigneeID: tc.assigneeID}
+			eligible, rejected := filter.Apply([]domain.Issue{issue})
+			gotEligible := len(eligible) == 1
+			if gotEligible != tc.want {
+				t.Fatalf("eligible = %v, want %v (rejections: %v)", gotEligible, tc.want, rejected)
+			}
+			if !tc.want && (len(rejected) != 1 || rejected[0].Reason != tc.reason) {
+				t.Fatalf("rejected = %+v, want reason %q", rejected, tc.reason)
+			}
+		})
+	}
+}
+
+func TestEligibilityFilter_RejectsAssignedIssueWhenCurrentUserUnknown(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{Identifier: "SAM-1", Labels: []string{"afk"}, AssigneeID: "user-current"}
+
+	eligible, rejected := SpurDefault.Apply([]domain.Issue{issue})
+	if len(eligible) != 0 {
+		t.Fatalf("eligible = %+v, want none", eligible)
+	}
+	if len(rejected) != 1 || rejected[0].Reason != "assignee_current_user_unknown" {
+		t.Fatalf("rejected = %+v, want assignee_current_user_unknown", rejected)
+	}
+}

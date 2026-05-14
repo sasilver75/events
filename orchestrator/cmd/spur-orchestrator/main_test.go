@@ -148,7 +148,7 @@ func TestValidatePreflightLocalReadinessForIssueReportsRunInputs(t *testing.T) {
 	}
 	got := err.Error()
 	for _, want := range []string{
-		"env var SPUR_TEST_LINEAR_KEY (or LINEAR_API_KEY) is not set",
+		"tracker.api_key references env var SPUR_TEST_LINEAR_KEY, but it is not set",
 		"SPUR_HARNESS_GITHUB_TOKEN is not set",
 		"SPUR_HARNESS_CODEX_DIR not found",
 	} {
@@ -170,7 +170,7 @@ func TestValidatePreflightLocalReadinessForDiscoveryOnlyRequiresLinear(t *testin
 		t.Fatal("expected error")
 	}
 	got := err.Error()
-	if !strings.Contains(got, "env var SPUR_TEST_LINEAR_KEY (or LINEAR_API_KEY) is not set") {
+	if !strings.Contains(got, "tracker.api_key references env var SPUR_TEST_LINEAR_KEY, but it is not set") {
 		t.Fatalf("readiness error missing Linear key:\n%s", got)
 	}
 	for _, notWant := range []string{"SPUR_HARNESS_GITHUB_TOKEN", "harness SSH key"} {

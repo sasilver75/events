@@ -31,7 +31,9 @@
 //
 // Required env vars at startup:
 //
-//	LINEAR_API_KEY                 → tracker reads
+//	LINEAR_API_KEY                 → tracker reads only when tracker.api_key is
+//	                                 omitted from WORKFLOW.md or set to
+//	                                 $LINEAR_API_KEY
 //	SPUR_HARNESS_GITHUB_TOKEN      → injected into per-VM credentials
 //	SPUR_HARNESS_LINEAR_BOT_TOKEN  → optional fallback for vm_env mode;
 //	                                 production host_proxy mode keeps Linear
@@ -163,13 +165,19 @@ func main() {
 	if err != nil {
 		fatal(logger, "linear client init failed", "err", err)
 	}
+	eligibility := linear.SpurDefault
+	viewerID, err := tracker.ViewerID(ctx)
+	if err != nil {
+		fatal(logger, "linear viewer lookup failed", "err", err)
+	}
+	eligibility.CurrentUserID = viewerID
 	if *preflight {
 		if *issue != "" {
 			if err := validatePreflightCredentials(githubToken); err != nil {
 				fatal(logger, "preflight failed", "err", err)
 			}
 		}
-		if err := runPreflight(ctx, cfg, tracker, linear.SpurDefault, *issue); err != nil {
+		if err := runPreflight(ctx, cfg, tracker, eligibility, *issue); err != nil {
 			fatal(logger, "preflight failed", "err", err)
 		}
 		if cfg.AgentRunnerName() == "codex" {
@@ -205,6 +213,7 @@ func main() {
 		Logger: logger,
 	}
 	orch := orchestrator.New(def, cfg, tracker, worker, logger)
+	orch.Eligibility = eligibility
 	orch.StatusFile = *statusFile
 	if err := orch.EnableWorkflowReload(*workflowPath); err != nil {
 		fatal(logger, "workflow reload setup failed", "path", *workflowPath, "err", err)
@@ -324,7 +333,7 @@ func runPreflightWithOutput(ctx context.Context, cfg workflow.ServiceConfig, tra
 
 	for _, issue := range eligible {
 		if issue.Identifier == issueIdentifier {
-			fmt.Fprintf(out, "Preflight passed: issue=%s runner=%s linear_access=%s\n", issue.Identifier, cfg.AgentRunnerName(), cfg.LinearAccessMode())
+			_, _ = fmt.Fprintf(out, "Preflight passed: issue=%s runner=%s linear_access=%s\n", issue.Identifier, cfg.AgentRunnerName(), cfg.LinearAccessMode())
 			return nil
 		}
 	}
@@ -337,18 +346,18 @@ func runPreflightWithOutput(ctx context.Context, cfg workflow.ServiceConfig, tra
 }
 
 func writePreflightCandidateSummary(out io.Writer, cfg workflow.ServiceConfig, candidates, eligible []domain.Issue, rejected []linear.Rejection) {
-	fmt.Fprintf(out, "Preflight passed: candidates=%d eligible=%d rejected=%d runner=%s linear_access=%s\n",
+	_, _ = fmt.Fprintf(out, "Preflight passed: candidates=%d eligible=%d rejected=%d runner=%s linear_access=%s\n",
 		len(candidates), len(eligible), len(rejected), cfg.AgentRunnerName(), cfg.LinearAccessMode())
 
 	sort.Slice(eligible, func(i, j int) bool {
 		return eligible[i].Identifier < eligible[j].Identifier
 	})
 	if len(eligible) == 0 {
-		fmt.Fprintln(out, "Eligible issues: none")
+		_, _ = fmt.Fprintln(out, "Eligible issues: none")
 	} else {
-		fmt.Fprintln(out, "Eligible issues:")
+		_, _ = fmt.Fprintln(out, "Eligible issues:")
 		for _, issue := range eligible {
-			fmt.Fprintf(out, "- %s [%s] %s\n", issue.Identifier, issue.State, issue.Title)
+			_, _ = fmt.Fprintf(out, "- %s [%s] %s\n", issue.Identifier, issue.State, issue.Title)
 		}
 	}
 
@@ -356,9 +365,9 @@ func writePreflightCandidateSummary(out io.Writer, cfg workflow.ServiceConfig, c
 		return rejected[i].Issue.Identifier < rejected[j].Issue.Identifier
 	})
 	if len(rejected) > 0 {
-		fmt.Fprintln(out, "Rejected active candidates:")
+		_, _ = fmt.Fprintln(out, "Rejected active candidates:")
 		for _, rejection := range rejected {
-			fmt.Fprintf(out, "- %s: %s\n", rejection.Issue.Identifier, rejection.Reason)
+			_, _ = fmt.Fprintf(out, "- %s: %s\n", rejection.Issue.Identifier, rejection.Reason)
 		}
 	}
 }
@@ -367,35 +376,35 @@ func writeCodexCanaryChecklist(out io.Writer, issueIdentifier string) {
 	if issueIdentifier == "" {
 		issueIdentifier = "<SAM-N>"
 	}
-	fmt.Fprintf(out, "Codex run evidence checklist for %s\n", issueIdentifier)
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Pre-run gates:")
-	fmt.Fprintf(out, "[ ] Discovery preflight listed %s as eligible.\n", issueIdentifier)
-	fmt.Fprintln(out, "[ ] Issue preflight passed with runner=codex and linear_access=host_proxy.")
-	fmt.Fprintln(out, "[ ] Issue preflight printed a Codex app-server user agent, codex_home, platform, and thread_id.")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Run evidence:")
-	fmt.Fprintf(out, "[ ] `spur-orchestrator --once --issue %s --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/%s-codex.json` exited 0.\n", issueIdentifier, issueIdentifier)
-	fmt.Fprintf(out, "[ ] `spur-orchestrator --codex-canary-verify-status --issue %s --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/%s-codex.json` exited 0.\n", issueIdentifier, issueIdentifier)
-	fmt.Fprintln(out, "[ ] Logs show `agent_runner=codex`, `linear_access=host_proxy`, `agent session started`, and `agent finished`.")
-	fmt.Fprintf(out, "[ ] Required status file `/tmp/spur-orchestrator/%s-codex.json` exists and contains `agent_runner=codex`, `linear_access=host_proxy`, `recent_runs[0].identifier=%s`, `recent_runs[0].status`, `recent_runs[0].session_id`, `recent_runs[0].thread_id`, `recent_runs[0].turn_id`, `recent_runs[0].token_info`, `recent_runs[0].rate_limits` if Codex emitted them, `codex_totals`, and latest `codex_rate_limits` if Codex emitted them.\n", issueIdentifier, issueIdentifier)
-	fmt.Fprintln(out, "[ ] The issue did not enter `needs_human` due to a successful-continuation loop.")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Linear handoff:")
-	fmt.Fprintln(out, "[ ] Pickup comment exists for the run attempt.")
-	fmt.Fprintln(out, "[ ] Issue was moved to `In Progress` while work was active.")
-	fmt.Fprintln(out, "[ ] Closeout comment exists with PR link, AC table, drift list, artifacts, and test evidence.")
-	fmt.Fprintln(out, "[ ] Issue state is `In Review` after the PR is opened.")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "GitHub handoff:")
-	fmt.Fprintln(out, "[ ] Branch was pushed.")
-	fmt.Fprintln(out, "[ ] PR title includes the issue identifier.")
-	fmt.Fprintln(out, "[ ] PR body links the Linear issue and includes self-assessment.")
-	fmt.Fprintln(out, "[ ] Required CI/checks are green or failures are explained in the Linear closeout.")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Credential boundary:")
-	fmt.Fprintln(out, "[ ] No host-held Linear credential leaked into the agent environment.")
-	fmt.Fprintln(out, "[ ] No unsupported Codex app-server request blocked the run.")
+	writef(out, "Codex run evidence checklist for %s\n", issueIdentifier)
+	writeln(out)
+	writeln(out, "Pre-run gates:")
+	writef(out, "[ ] Discovery preflight listed %s as eligible.\n", issueIdentifier)
+	writeln(out, "[ ] Issue preflight passed with runner=codex and linear_access=host_proxy.")
+	writeln(out, "[ ] Issue preflight printed a Codex app-server user agent, codex_home, platform, and thread_id.")
+	writeln(out)
+	writeln(out, "Run evidence:")
+	writef(out, "[ ] `spur-orchestrator --once --issue %s --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/%s-codex.json` exited 0.\n", issueIdentifier, issueIdentifier)
+	writef(out, "[ ] `spur-orchestrator --codex-canary-verify-status --issue %s --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/%s-codex.json` exited 0.\n", issueIdentifier, issueIdentifier)
+	writeln(out, "[ ] Logs show `agent_runner=codex`, `linear_access=host_proxy`, `agent session started`, and `agent finished`.")
+	writef(out, "[ ] Required status file `/tmp/spur-orchestrator/%s-codex.json` exists and contains `agent_runner=codex`, `linear_access=host_proxy`, `recent_runs[0].identifier=%s`, `recent_runs[0].status`, `recent_runs[0].session_id`, `recent_runs[0].thread_id`, `recent_runs[0].turn_id`, `recent_runs[0].token_info`, `recent_runs[0].rate_limits` if Codex emitted them, `codex_totals`, and latest `codex_rate_limits` if Codex emitted them.\n", issueIdentifier, issueIdentifier)
+	writeln(out, "[ ] The issue did not enter `needs_human` due to a successful-continuation loop.")
+	writeln(out)
+	writeln(out, "Linear handoff:")
+	writeln(out, "[ ] Pickup comment exists for the run attempt.")
+	writeln(out, "[ ] Issue was moved to `In Progress` while work was active.")
+	writeln(out, "[ ] Closeout comment exists with PR link, AC table, drift list, artifacts, and test evidence.")
+	writeln(out, "[ ] Issue state is `In Review` after the PR is opened.")
+	writeln(out)
+	writeln(out, "GitHub handoff:")
+	writeln(out, "[ ] Branch was pushed.")
+	writeln(out, "[ ] PR title includes the issue identifier.")
+	writeln(out, "[ ] PR body links the Linear issue and includes self-assessment.")
+	writeln(out, "[ ] Required CI/checks are green or failures are explained in the Linear closeout.")
+	writeln(out)
+	writeln(out, "Credential boundary:")
+	writeln(out, "[ ] No host-held Linear credential leaked into the agent environment.")
+	writeln(out, "[ ] No unsupported Codex app-server request blocked the run.")
 }
 
 func verifyCodexCanaryStatusArgs(issueIdentifier, statusFile string) error {
@@ -462,13 +471,13 @@ func verifyCodexCanaryStatusFile(path, issueIdentifier string, out io.Writer) er
 		return fmt.Errorf("codex_totals.total_tokens=%d is less than run total_tokens=%d", snapshot.CodexTotals.TotalTokens, run.TokenInfo.TotalTokens)
 	}
 
-	fmt.Fprintf(out, "Codex status verified: issue=%s status=%s session_id=%s thread_id=%s turn_id=%s tokens=%d runner=%s linear_access=%s\n",
+	writef(out, "Codex status verified: issue=%s status=%s session_id=%s thread_id=%s turn_id=%s tokens=%d runner=%s linear_access=%s\n",
 		issueIdentifier, run.Status, run.SessionID, run.ThreadID, run.TurnID, run.TokenInfo.TotalTokens, snapshot.AgentRunner, snapshot.LinearAccess)
 	if !hasNonNullJSONField(runRaw, "rate_limits") {
-		fmt.Fprintln(out, "Warning: recent run has no rate_limits; this is acceptable only if Codex did not emit rate-limit telemetry.")
+		writeln(out, "Warning: recent run has no rate_limits; this is acceptable only if Codex did not emit rate-limit telemetry.")
 	}
 	if !hasNonNullJSONField(raw, "codex_rate_limits") {
-		fmt.Fprintln(out, "Warning: status file has no codex_rate_limits; this is acceptable only if Codex did not emit rate-limit telemetry.")
+		writeln(out, "Warning: status file has no codex_rate_limits; this is acceptable only if Codex did not emit rate-limit telemetry.")
 	}
 	return nil
 }
@@ -512,4 +521,12 @@ func hasNonNullJSONField(fields map[string]json.RawMessage, name string) bool {
 func fatal(logger *slog.Logger, msg string, kv ...any) {
 	logger.Error(msg, kv...)
 	os.Exit(1)
+}
+
+func writef(out io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintf(out, format, args...)
+}
+
+func writeln(out io.Writer, args ...any) {
+	_, _ = fmt.Fprintln(out, args...)
 }

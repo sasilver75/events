@@ -45,6 +45,7 @@ query CandidateIssues($projectSlug: String!, $states: [String!]!, $first: Int!, 
       url
       createdAt
       updatedAt
+      assignee { id name email }
       state { name }
       labels { nodes { name } }
       inverseRelations {
@@ -75,19 +76,32 @@ query IssueStatesByIDs($issueIds: [ID!]!) {
 // queryTerminalIssues fetches issues in $states (used at startup to remove
 // stale workspaces from terminal-state issues). Symphony spec §8.6.
 const queryTerminalIssues = `
-query TerminalIssues($projectSlug: String!, $states: [String!]!, $first: Int!) {
+query TerminalIssues($projectSlug: String!, $states: [String!]!, $first: Int!, $after: String) {
   issues(
     filter: {
       project: { slugId: { eq: $projectSlug } }
       state: { name: { in: $states } }
     }
     first: $first
+    after: $after
   ) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
     nodes {
       id
       identifier
       state { name }
     }
+  }
+}
+`
+
+const queryViewer = `
+query Viewer {
+  viewer {
+    id
   }
 }
 `

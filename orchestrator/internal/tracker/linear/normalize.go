@@ -21,6 +21,12 @@ type rawIssue struct {
 	CreatedAt   string  `json:"createdAt"`
 	UpdatedAt   string  `json:"updatedAt"`
 
+	Assignee *struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	} `json:"assignee"`
+
 	State *struct {
 		Name string `json:"name"`
 	} `json:"state"`
@@ -67,6 +73,9 @@ func (r rawIssue) normalize() domain.Issue {
 	}
 	if r.State != nil {
 		issue.State = r.State.Name
+	}
+	if r.Assignee != nil {
+		issue.AssigneeID = r.Assignee.ID
 	}
 
 	// Priority: Linear's API returns it as a Float in GraphQL even when the

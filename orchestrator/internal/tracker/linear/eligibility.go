@@ -14,6 +14,7 @@ import (
 //   - label "afk" present
 //   - label "hitl" absent
 //   - all blockers in state "Done"
+//   - assignee empty or assigned to the current Linear API user
 //
 // This is applied client-side after FetchCandidateIssues because Linear's
 // GraphQL filter API can't express "all blockers in Done" in one query —
@@ -22,6 +23,7 @@ type EligibilityFilter struct {
 	RequireLabel   string   // typically "afk"
 	ExcludeLabel   string   // typically "hitl"
 	TerminalStates []string // states that count as "blocker resolved" (typically "Done")
+	CurrentUserID  string   // Linear viewer ID for the harness API key
 }
 
 // SpurDefault is the eligibility filter applied to every spur-agent run.
@@ -54,6 +56,16 @@ func (f EligibilityFilter) Apply(issues []domain.Issue) (eligible []domain.Issue
 		if blockerOpen := firstOpenBlocker(issue, terminalSet); blockerOpen != "" {
 			rejected = append(rejected, Rejection{Issue: issue, Reason: "blocked_by_open:" + blockerOpen})
 			continue
+		}
+		if issue.AssigneeID != "" {
+			if f.CurrentUserID == "" {
+				rejected = append(rejected, Rejection{Issue: issue, Reason: "assignee_current_user_unknown"})
+				continue
+			}
+			if issue.AssigneeID != f.CurrentUserID {
+				rejected = append(rejected, Rejection{Issue: issue, Reason: "assigned_to_other:" + issue.AssigneeID})
+				continue
+			}
 		}
 		eligible = append(eligible, issue)
 	}

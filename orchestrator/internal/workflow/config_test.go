@@ -75,6 +75,9 @@ func TestNewServiceConfig_OverridesFromFrontMatter(t *testing.T) {
 	if cfg.Tracker.APIKeyLiteral != "" {
 		t.Errorf("Tracker.APIKeyLiteral = %q, want empty", cfg.Tracker.APIKeyLiteral)
 	}
+	if !cfg.Tracker.APIKeySet {
+		t.Error("Tracker.APIKeySet = false, want true")
+	}
 	if cfg.Tracker.ProjectSlug != "spur-c956b9432c2f" {
 		t.Errorf("Tracker.ProjectSlug = %q", cfg.Tracker.ProjectSlug)
 	}
@@ -122,6 +125,50 @@ func TestNewServiceConfig_ParsesLiteralTrackerAPIKey(t *testing.T) {
 	}
 	if cfg.Tracker.APIKeyEnv != "" {
 		t.Fatalf("Tracker.APIKeyEnv = %q, want empty", cfg.Tracker.APIKeyEnv)
+	}
+}
+
+func TestServiceConfig_ResolveTrackerAPIKeySupportsLiteral(t *testing.T) {
+	t.Setenv("LINEAR_API_KEY", "lin_env")
+	cfg := ServiceConfig{
+		Tracker: TrackerConfig{APIKeyLiteral: "lin_literal", APIKeySet: true},
+	}
+
+	got, err := cfg.ResolveTrackerAPIKey()
+	if err != nil {
+		t.Fatalf("ResolveTrackerAPIKey: %v", err)
+	}
+	if got != "lin_literal" {
+		t.Fatalf("ResolveTrackerAPIKey = %q, want lin_literal", got)
+	}
+}
+
+func TestServiceConfig_ResolveTrackerAPIKeyUsesExplicitEnvOnly(t *testing.T) {
+	t.Setenv("SPUR_TEST_LINEAR_KEY", "")
+	t.Setenv("LINEAR_API_KEY", "lin_fallback_should_not_apply")
+	cfg := ServiceConfig{
+		Tracker: TrackerConfig{APIKeyEnv: "SPUR_TEST_LINEAR_KEY", APIKeySet: true},
+	}
+
+	_, err := cfg.ResolveTrackerAPIKey()
+	if !errors.Is(err, ErrMissingTrackerAPIKey) {
+		t.Fatalf("ResolveTrackerAPIKey() = %v, want ErrMissingTrackerAPIKey", err)
+	}
+	if got := err.Error(); got != "missing_tracker_api_key: tracker.api_key references env var SPUR_TEST_LINEAR_KEY, but it is not set" {
+		t.Fatalf("error = %q", got)
+	}
+}
+
+func TestServiceConfig_ResolveTrackerAPIKeyUsesFallbackWhenUnset(t *testing.T) {
+	t.Setenv("LINEAR_API_KEY", "lin_fallback")
+	cfg := ServiceConfig{}
+
+	got, err := cfg.ResolveTrackerAPIKey()
+	if err != nil {
+		t.Fatalf("ResolveTrackerAPIKey: %v", err)
+	}
+	if got != "lin_fallback" {
+		t.Fatalf("ResolveTrackerAPIKey = %q, want lin_fallback", got)
 	}
 }
 
@@ -234,10 +281,9 @@ func TestServiceConfig_ValidateRequiresResolvedTrackerAPIKey(t *testing.T) {
 }
 
 func TestServiceConfig_ValidateUsesTrackerAPIKeyEnvFallback(t *testing.T) {
-	t.Setenv("SPUR_TEST_LINEAR_KEY", "")
 	t.Setenv("LINEAR_API_KEY", "lin_test")
 	cfg := ServiceConfig{
-		Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur", APIKeyEnv: "SPUR_TEST_LINEAR_KEY"},
+		Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
 		Codex:   CodexConfig{Command: "codex app-server"},
 	}
 
