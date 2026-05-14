@@ -208,8 +208,8 @@ func NewServiceConfig(raw map[string]any) ServiceConfig {
 		if v := intField(c, "read_timeout_ms"); v > 0 {
 			cfg.Codex.ReadTimeoutMs = v
 		}
-		if v := intField(c, "stall_timeout_ms"); v > 0 {
-			cfg.Codex.StallTimeoutMs = v
+		if _, ok := c["stall_timeout_ms"]; ok {
+			cfg.Codex.StallTimeoutMs = intField(c, "stall_timeout_ms")
 		}
 		if v := stringField(c, "approval_policy"); v != "" {
 			cfg.Codex.ApprovalPolicy = v

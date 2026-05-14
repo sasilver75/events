@@ -149,6 +149,19 @@ func TestNewServiceConfig_OverridesFromFrontMatter(t *testing.T) {
 	}
 }
 
+func TestNewServiceConfig_AllowsExplicitZeroStallTimeout(t *testing.T) {
+	t.Parallel()
+	cfg := NewServiceConfig(map[string]any{
+		"codex": map[string]any{
+			"stall_timeout_ms": 0,
+		},
+	})
+
+	if cfg.AgentStallTimeoutMs() != 0 {
+		t.Fatalf("AgentStallTimeoutMs = %d, want 0", cfg.AgentStallTimeoutMs())
+	}
+}
+
 func TestNewServiceConfig_IgnoresInvalidCodexSandboxConfig(t *testing.T) {
 	t.Parallel()
 	cfg := NewServiceConfig(map[string]any{

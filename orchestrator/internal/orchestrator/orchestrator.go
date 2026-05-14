@@ -409,6 +409,7 @@ func (o *Orchestrator) handleWorkerResult(res WorkerResult) {
 		}
 		delete(o.stalledRunning, res.Issue.ID)
 	}
+	res = mergeWorkerResultWithLiveSession(res, runningEntry.Session)
 	finishedAt := time.Now().UTC()
 	o.recordRunTelemetryLocked(res, runningEntry, hadRunningEntry)
 	o.recordRunAttemptLocked(res, runningEntry.StartedAt, finishedAt)
@@ -753,7 +754,7 @@ func (o *Orchestrator) dispatchUpToCapacity(ctx context.Context, sorted []domain
 		o.state.Claimed[issue.ID] = struct{}{}
 		o.state.Running[issue.ID] = domain.RunningEntry{
 			Issue:     issue,
-			Session:   domain.LiveSession{LastEvent: "run_started", LastTimestamp: now},
+			Session:   domain.LiveSession{LastEvent: "run_started"},
 			StartedAt: now,
 			Attempt:   attempt,
 		}
@@ -834,7 +835,9 @@ func (o *Orchestrator) recordAgentEvent(issueID string, ev agent.Event) {
 	}
 	entry.Session.LastEvent = string(ev.Type)
 	entry.Session.LastTimestamp = timestamp
-	entry.Session.LastMessage = ev.Error
+	if msg := summarizeAgentEvent(ev); msg != "" {
+		entry.Session.LastMessage = msg
+	}
 	if ev.SessionID != "" {
 		entry.Session.SessionID = ev.SessionID
 	}
@@ -854,6 +857,7 @@ func (o *Orchestrator) recordAgentEvent(issueID string, ev agent.Event) {
 		entry.Session.TotalTokens = ev.Usage.TotalTokens
 	}
 	if ev.RateLimits != nil {
+		entry.Session.RateLimits = ev.RateLimits
 		o.state.CodexRateLimits = ev.RateLimits
 	}
 	o.state.Running[issueID] = entry

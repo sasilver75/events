@@ -67,6 +67,8 @@ type LiveSession struct {
 	LastReportedOutputTokens int
 	LastReportedTotalTokens  int
 
+	RateLimits any
+
 	// TurnCount is the number of coding-agent turns started within the
 	// current worker lifetime. The worker may run multiple back-to-back
 	// turns on the same thread before exiting (spec §7.1).
