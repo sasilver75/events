@@ -24,15 +24,15 @@ The two main artifacts are:
 | Hooks run with `cwd = workspace_path`. | Hooks run on the host and use `tart`, `ssh`, and `scp` against the VM. |
 | `max_concurrent_agents` default is 10. | Spur caps at 2 because Apple's macOS guest license allows two concurrent guests. |
 | Active states default to `Todo` / `In Progress`. | Spur picks up `Ready` / `In Progress` only. |
-| Candidate eligibility is active-state plus scheduler availability. | Spur also requires `AFK`, excludes `HITL`, and requires blockers to be `Done`. |
+| Candidate eligibility is active-state plus scheduler availability. | Spur also requires `AFK`, excludes `HITL`, requires blockers to be `Done`, and only claims unassigned issues or issues assigned to the Linear API user. |
 
 ## Implementation Status
 
 Implemented:
 
 - `WORKFLOW.md` loader, YAML front matter parser, typed config, validation, and Liquid prompt rendering.
-- Linear tracker reader for candidate fetch, running-issue refresh, terminal-state lookup, and narrow `Needs Human` escalation.
-- Eligibility filter for `AFK`/`HITL` labels and blockers.
+- Linear tracker reader for candidate fetch, running-issue refresh, paginated terminal-state lookup, current-user lookup, and narrow `Needs Human` escalation.
+- Eligibility filter for `AFK`/`HITL` labels, blockers, and assignee ownership.
 - Tart workspace manager: clone/reuse, boot, SSH readiness, stop/delete.
 - Host hook runner for `after_create`, `before_run`, `after_run`, and `before_remove`.
 - Codex app-server runner over SSH, including initialize, thread start/resume, turn start, completion/error normalization, dynamic tool calls, token usage, and rate-limit capture.
@@ -53,7 +53,7 @@ Not implemented:
 ## Lifecycle
 
 1. **Poll tick.** Reconcile running issues, then fetch Linear candidates in active states.
-2. **Eligibility.** Keep issues with `AFK`, without `HITL`, and without open blockers.
+2. **Eligibility.** Keep issues with `AFK`, without `HITL`, without open blockers, and with no assignee or an assignee matching the Linear API user.
 3. **Dispatch.** Sort by priority, creation time, and identifier; claim up to `max_concurrent_agents`.
 4. **Workspace prep.** Clone or boot `spur-ticket-<id>` from `spur-base` and wait for SSH.
 5. **Hooks.** Run `after_create` on first creation and `before_run` before each attempt. In `host_proxy`, `SPUR_LINEAR_TOKEN` is intentionally empty.
@@ -70,6 +70,12 @@ Long-lived credentials live on the host. See [credentials-setup.md](./credential
 | Linear API key | Tracker reads and `linear_graphql` | Host only in production. |
 | GitHub PAT | Clone, push, PR creation | Injected into the VM as `GITHUB_TOKEN`. |
 | Codex auth/config | Run Codex app-server | Either already in the VM or shipped from optional `SPUR_HARNESS_CODEX_DIR`. |
+
+`tracker.api_key` follows Symphony's schema: it may be a literal token or a
+`$VAR` reference. Spur still supports `LINEAR_API_KEY` as a compatibility
+fallback, but only when `tracker.api_key` is omitted. Explicit YAML values are
+authoritative: a literal token is used as-is, and a `$VAR` reference must be set
+in that exact environment variable.
 
 ## End-of-Run Publication
 

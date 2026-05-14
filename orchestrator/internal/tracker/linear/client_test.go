@@ -52,6 +52,7 @@ func TestFetchCandidateIssues_HappyPath(t *testing.T) {
 							"url": "https://linear.app/samcorp/issue/SAM-12",
 							"createdAt": "2026-05-10T12:00:00.000Z",
 							"updatedAt": "2026-05-10T13:00:00.000Z",
+							"assignee": {"id": "user-1", "name": "Agent", "email": "agent@example.com"},
 							"state": {"name": "Ready"},
 							"labels": {"nodes": [{"name": "AFK"}, {"name": "Feature"}]},
 							"inverseRelations": {
@@ -85,6 +86,9 @@ func TestFetchCandidateIssues_HappyPath(t *testing.T) {
 	}
 	if i.State != "Ready" {
 		t.Errorf("State = %q", i.State)
+	}
+	if i.AssigneeID != "user-1" {
+		t.Errorf("AssigneeID = %q, want user-1", i.AssigneeID)
 	}
 	if len(i.Labels) != 2 || i.Labels[0] != "afk" || i.Labels[1] != "feature" {
 		t.Errorf("Labels = %v (should be lowercased)", i.Labels)
@@ -178,6 +182,83 @@ func TestFetchIssueStatesByIDs(t *testing.T) {
 	}
 	if _, present := out["uuid-3"]; present {
 		t.Errorf("uuid-3 should be absent (Linear didn't return it)")
+	}
+}
+
+func TestFetchIssuesByStates_Paginates(t *testing.T) {
+	t.Parallel()
+	var afterSeen []any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(req.Query, "TerminalIssues") {
+			t.Fatalf("query = %s, want TerminalIssues", req.Query)
+		}
+		afterSeen = append(afterSeen, req.Variables["after"])
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Variables["after"] {
+		case nil:
+			_, _ = w.Write([]byte(`{"data":{"issues":{"pageInfo":{"hasNextPage":true,"endCursor":"cursor-1"},"nodes":[
+				{"id":"uuid-1","identifier":"SAM-1","state":{"name":"Done"}}
+			]}}}`))
+		case "cursor-1":
+			_, _ = w.Write([]byte(`{"data":{"issues":{"pageInfo":{"hasNextPage":false,"endCursor":""},"nodes":[
+				{"id":"uuid-2","identifier":"SAM-2","state":{"name":"Done"}}
+			]}}}`))
+		default:
+			t.Fatalf("unexpected after cursor: %v", req.Variables["after"])
+		}
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{Endpoint: srv.URL, APIKey: "lin_api_test", ProjectSlug: "spur"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issues, err := c.FetchIssuesByStates(context.Background(), []string{"Done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 2 || issues[0].Identifier != "SAM-1" || issues[1].Identifier != "SAM-2" {
+		t.Fatalf("issues = %+v, want SAM-1 and SAM-2", issues)
+	}
+	if len(afterSeen) != 2 || afterSeen[0] != nil || afterSeen[1] != "cursor-1" {
+		t.Fatalf("after cursors = %+v, want [nil cursor-1]", afterSeen)
+	}
+}
+
+func TestViewerID(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query string `json:"query"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(req.Query, "Viewer") {
+			t.Fatalf("query = %s, want Viewer", req.Query)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"viewer":{"id":"user-current"}}}`))
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{Endpoint: srv.URL, APIKey: "lin_api_test", ProjectSlug: "spur"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.ViewerID(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "user-current" {
+		t.Fatalf("ViewerID = %q, want user-current", got)
 	}
 }
 

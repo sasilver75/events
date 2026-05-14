@@ -6,6 +6,10 @@
 tracker:
   kind: linear
   endpoint: https://api.linear.app/graphql
+  # Symphony allows either a literal token or a "$VAR" reference here. Spur
+  # supports both. If this field is omitted entirely, the orchestrator falls
+  # back to LINEAR_API_KEY for older local setups. Once api_key is present,
+  # no fallback overrides it: "$VAR" must resolve to that exact env var.
   api_key: $LINEAR_API_KEY
   project_slug: spur-c956b9432c2f
   active_states:

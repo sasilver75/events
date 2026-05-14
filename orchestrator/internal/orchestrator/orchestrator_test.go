@@ -279,6 +279,35 @@ func TestRunOnce_ExplicitIssueMustBeEligible(t *testing.T) {
 	}
 }
 
+func TestRunOnce_ExplicitIssueRejectsOtherAssignee(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{
+		ID:         "uuid-1",
+		Identifier: "SAM-12",
+		Title:      "Test",
+		State:      "Ready",
+		Labels:     []string{"afk"},
+		AssigneeID: "user-other",
+	}
+	tracker := &fakeTracker{candidates: []domain.Issue{issue}}
+	worker := &recordingWorker{result: WorkerResult{Status: domain.RunStatusSucceeded}}
+
+	o := New(nil, validConfig(), tracker, worker, silentLogger())
+	o.Eligibility.CurrentUserID = "user-current"
+	err := o.RunOnce(context.Background(), "SAM-12")
+	if err == nil {
+		t.Fatal("expected eligibility error")
+	}
+	if !strings.Contains(err.Error(), "assigned_to_other:user-other") {
+		t.Fatalf("error = %q, want assigned_to_other reason", err)
+	}
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	if len(worker.calls) != 0 {
+		t.Fatalf("worker should not have been called: %v", worker.calls)
+	}
+}
+
 func TestRunOnce_IssueNotFound(t *testing.T) {
 	t.Parallel()
 	tracker := &fakeTracker{candidates: nil}

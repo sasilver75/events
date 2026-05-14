@@ -165,24 +165,62 @@ func (c *Client) FetchIssueStatesByIDs(ctx context.Context, ids []string) (map[s
 // FetchIssuesByStates returns all issues currently in any of the given
 // states. Used at startup for terminal-workspace cleanup (spec §8.6).
 func (c *Client) FetchIssuesByStates(ctx context.Context, states []string) ([]domain.Issue, error) {
-	vars := map[string]any{
-		"projectSlug": c.projectSlug,
-		"states":      states,
-		"first":       250, // hard cap; if you have more terminal issues than this you have other problems
+	var (
+		out    []domain.Issue
+		cursor *string
+	)
+	for {
+		vars := map[string]any{
+			"projectSlug": c.projectSlug,
+			"states":      states,
+			"first":       defaultPageSize,
+		}
+		if cursor != nil {
+			vars["after"] = *cursor
+		}
+		var resp struct {
+			Issues struct {
+				PageInfo struct {
+					HasNextPage bool   `json:"hasNextPage"`
+					EndCursor   string `json:"endCursor"`
+				} `json:"pageInfo"`
+				Nodes []rawIssue `json:"nodes"`
+			} `json:"issues"`
+		}
+		if err := c.do(ctx, queryTerminalIssues, vars, &resp); err != nil {
+			return nil, err
+		}
+		for _, r := range resp.Issues.Nodes {
+			out = append(out, r.normalize())
+		}
+		if !resp.Issues.PageInfo.HasNextPage {
+			break
+		}
+		if resp.Issues.PageInfo.EndCursor == "" {
+			return nil, fmt.Errorf("%w: terminal issues hasNextPage=true but endCursor empty", ErrLinearMissingEndCursor)
+		}
+		cursor = &resp.Issues.PageInfo.EndCursor
 	}
-	var resp struct {
-		Issues struct {
-			Nodes []rawIssue `json:"nodes"`
-		} `json:"issues"`
-	}
-	if err := c.do(ctx, queryTerminalIssues, vars, &resp); err != nil {
-		return nil, err
-	}
-	out := make([]domain.Issue, 0, len(resp.Issues.Nodes))
-	for _, r := range resp.Issues.Nodes {
-		out = append(out, r.normalize())
+	if out == nil {
+		out = []domain.Issue{}
 	}
 	return out, nil
+}
+
+// ViewerID returns the Linear user ID associated with the configured API key.
+func (c *Client) ViewerID(ctx context.Context) (string, error) {
+	var resp struct {
+		Viewer *struct {
+			ID string `json:"id"`
+		} `json:"viewer"`
+	}
+	if err := c.do(ctx, queryViewer, map[string]any{}, &resp); err != nil {
+		return "", err
+	}
+	if resp.Viewer == nil || resp.Viewer.ID == "" {
+		return "", fmt.Errorf("%w: viewer.id missing", ErrLinearUnknownPayload)
+	}
+	return resp.Viewer.ID, nil
 }
 
 func (c *Client) EscalateNeedsHuman(ctx context.Context, issue domain.Issue, reason string, attempts int) error {
@@ -339,7 +377,9 @@ func (c *Client) do(ctx context.Context, query string, vars map[string]any, dst 
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrLinearAPIRequest, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {

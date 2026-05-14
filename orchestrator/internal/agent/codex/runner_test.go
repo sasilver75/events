@@ -207,10 +207,10 @@ func TestRunProtocolCompletesAgainstFakeAppServer(t *testing.T) {
 	t.Parallel()
 	serverIn, clientIn := io.Pipe()
 	clientOut, serverOut := io.Pipe()
-	defer serverIn.Close()
-	defer clientIn.Close()
-	defer clientOut.Close()
-	defer serverOut.Close()
+	defer func() { _ = serverIn.Close() }()
+	defer func() { _ = clientIn.Close() }()
+	defer func() { _ = clientOut.Close() }()
+	defer func() { _ = serverOut.Close() }()
 
 	errs := make(chan error, 1)
 	go func() {
@@ -269,10 +269,10 @@ func TestRunProtocolResumeAdvertisesDynamicTools(t *testing.T) {
 	t.Parallel()
 	serverIn, clientIn := io.Pipe()
 	clientOut, serverOut := io.Pipe()
-	defer serverIn.Close()
-	defer clientIn.Close()
-	defer clientOut.Close()
-	defer serverOut.Close()
+	defer func() { _ = serverIn.Close() }()
+	defer func() { _ = clientIn.Close() }()
+	defer func() { _ = clientOut.Close() }()
+	defer func() { _ = serverOut.Close() }()
 
 	errs := make(chan error, 1)
 	go func() {
