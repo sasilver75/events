@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+# spur-codex-canary - explicit operator wrapper for the Codex canary path.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ORCHESTRATOR_BIN="$REPO_ROOT/orchestrator/bin/spur-orchestrator"
+WORKFLOW_PATH="$REPO_ROOT/WORKFLOW.md"
+DEFAULT_CODEX_HARNESS_DIR="$HOME/.spur/codex-harness"
+KEYCHAIN="${SPUR_HARNESS_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
+ENV_FILE="${SPUR_HARNESS_ENV_FILE:-$HOME/.spur/env}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  scripts/spur-codex-canary discover
+  scripts/spur-codex-canary doctor
+  scripts/spur-codex-canary preflight <SAM-id>
+  scripts/spur-codex-canary run <SAM-id> [status-file]
+  scripts/spur-codex-canary verify <SAM-id> [status-file]
+  scripts/spur-codex-canary checklist <SAM-id>
+  scripts/spur-codex-canary smoke
+  scripts/spur-codex-canary --help
+
+Default status file:
+  /tmp/spur-orchestrator/<SAM-id>-codex.json
+
+Required env or Keychain entries for preflight/run:
+  LINEAR_API_KEY or ~/.spur/env or Keychain item spur-linear-api-key
+  SPUR_HARNESS_GITHUB_TOKEN or ~/.spur/env or Keychain item spur-harness-github-token
+  SPUR_HARNESS_SSH_KEY (defaults to ~/.ssh/spur-agent-vm)
+  SPUR_HARNESS_CODEX_DIR (optional; defaults to ~/.spur/codex-harness when it exists)
+EOF
+}
+
+if [ $# -eq 0 ]; then
+  usage
+  exit 1
+fi
+
+build_if_needed() {
+  if [ ! -x "$ORCHESTRATOR_BIN" ] || [ "$(find "$REPO_ROOT/orchestrator" -name '*.go' -newer "$ORCHESTRATOR_BIN" 2>/dev/null | head -1)" ]; then
+    echo "==> Building spur-orchestrator..."
+    (cd "$REPO_ROOT/orchestrator" && go build -o bin/spur-orchestrator ./cmd/spur-orchestrator)
+  fi
+}
+
+issue_required() {
+  if [ $# -lt 1 ] || [ -z "${1:-}" ]; then
+    echo "missing issue id" >&2
+    usage
+    exit 1
+  fi
+}
+
+status_file_for() {
+  local issue_id="$1"
+  local explicit="${2:-}"
+  if [ -n "$explicit" ]; then
+    printf '%s\n' "$explicit"
+  else
+    printf '/tmp/spur-orchestrator/%s-codex.json\n' "$issue_id"
+  fi
+}
+
+use_default_codex_harness_if_present() {
+  if [ -z "${SPUR_HARNESS_CODEX_DIR:-}" ] && [ -d "$DEFAULT_CODEX_HARNESS_DIR" ]; then
+    export SPUR_HARNESS_CODEX_DIR="$DEFAULT_CODEX_HARNESS_DIR"
+  fi
+}
+
+load_env_file_if_present() {
+  if [ -f "$ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    source "$ENV_FILE" 2>/dev/null
+  fi
+}
+
+load_keychain_credentials_if_needed() {
+  if ! command -v security >/dev/null; then
+    return 0
+  fi
+  if [ -z "${LINEAR_API_KEY:-}" ]; then
+    if value="$(security find-generic-password -a "$USER" -s spur-linear-api-key -w "$KEYCHAIN" 2>/dev/null)"; then
+      export LINEAR_API_KEY="$value"
+    fi
+  fi
+  if [ -z "${SPUR_HARNESS_GITHUB_TOKEN:-}" ]; then
+    if value="$(security find-generic-password -a "$USER" -s spur-harness-github-token -w "$KEYCHAIN" 2>/dev/null)"; then
+      export SPUR_HARNESS_GITHUB_TOKEN="$value"
+    fi
+  fi
+}
+
+credential_present() {
+  local env_name="$1"
+  local service="$2"
+  if [ -n "${!env_name:-}" ]; then
+    return 0
+  fi
+  if command -v security >/dev/null && security find-generic-password -a "$USER" -s "$service" "$KEYCHAIN" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+doctor() {
+  local ok=0
+  load_env_file_if_present
+
+  if credential_present LINEAR_API_KEY spur-linear-api-key; then
+    echo "[ok] Linear key present via env or Keychain"
+  else
+    echo "[missing] LINEAR_API_KEY via env, $ENV_FILE, or Keychain item spur-linear-api-key"
+    ok=1
+  fi
+
+  if credential_present SPUR_HARNESS_GITHUB_TOKEN spur-harness-github-token; then
+    echo "[ok] GitHub token present via env or Keychain"
+  else
+    echo "[missing] SPUR_HARNESS_GITHUB_TOKEN via env, $ENV_FILE, or Keychain item spur-harness-github-token"
+    ok=1
+  fi
+
+  local ssh_key="${SPUR_HARNESS_SSH_KEY:-$HOME/.ssh/spur-agent-vm}"
+  if [ -f "$ssh_key" ]; then
+    echo "[ok] Harness SSH key present"
+  else
+    echo "[missing] Harness SSH key at $ssh_key"
+    ok=1
+  fi
+
+  local codex_dir="${SPUR_HARNESS_CODEX_DIR:-$DEFAULT_CODEX_HARNESS_DIR}"
+  if [ -d "$codex_dir" ]; then
+    if [ -f "$codex_dir/auth.json" ]; then
+      echo "[ok] Codex harness snapshot present with auth.json"
+    else
+      echo "[warn] Codex harness snapshot present but auth.json is missing"
+    fi
+  else
+    echo "[warn] Optional Codex harness snapshot not found at $codex_dir"
+  fi
+
+  return "$ok"
+}
+
+prepare_canary_env() {
+  load_env_file_if_present
+  load_keychain_credentials_if_needed
+  use_default_codex_harness_if_present
+}
+
+cmd="$1"
+shift
+
+case "$cmd" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  smoke)
+    build_if_needed
+    exec "$ORCHESTRATOR_BIN" --workflow "$WORKFLOW_PATH" --codex-smoke
+    ;;
+  doctor)
+    doctor
+    ;;
+  discover)
+    build_if_needed
+    prepare_canary_env
+    exec "$ORCHESTRATOR_BIN" --workflow "$WORKFLOW_PATH" --once --codex-canary --preflight
+    ;;
+  preflight)
+    issue_required "$@"
+    build_if_needed
+    prepare_canary_env
+    exec "$ORCHESTRATOR_BIN" --workflow "$WORKFLOW_PATH" --once --issue "$1" --codex-canary --preflight
+    ;;
+  run)
+    issue_required "$@"
+    build_if_needed
+    prepare_canary_env
+    status_file="$(status_file_for "$1" "${2:-}")"
+    exec "$ORCHESTRATOR_BIN" --workflow "$WORKFLOW_PATH" --once --issue "$1" --codex-canary --status-file "$status_file"
+    ;;
+  verify)
+    issue_required "$@"
+    build_if_needed
+    status_file="$(status_file_for "$1" "${2:-}")"
+    exec "$ORCHESTRATOR_BIN" --workflow "$WORKFLOW_PATH" --codex-canary-verify-status --issue "$1" --status-file "$status_file"
+    ;;
+  checklist)
+    issue_required "$@"
+    build_if_needed
+    exec "$ORCHESTRATOR_BIN" --workflow "$WORKFLOW_PATH" --codex-canary-checklist --issue "$1"
+    ;;
+  *)
+    echo "unknown command: $cmd" >&2
+    usage
+    exit 1
+    ;;
+esac

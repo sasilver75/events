@@ -18,3 +18,32 @@ Enable per clone:
     git config core.hooksPath scripts/git-hooks
 
 Bypass with `git push --no-verify` when you know what you're doing.
+
+## Agent harness
+
+`spur-agent` dispatches one Linear issue through the default production runner.
+
+`spur-store-harness-secret` stores Linear/GitHub harness tokens through a
+silent prompt, avoiding shell history. It defaults to macOS Keychain and also
+supports a chmod-600 `~/.spur/env` fallback with `--env-file`.
+
+`spur-codex-canary` wraps the explicit Codex proof sequence:
+
+```sh
+scripts/spur-snapshot-codex.sh
+scripts/spur-codex-canary doctor
+scripts/spur-codex-canary smoke
+scripts/spur-codex-canary discover
+scripts/spur-codex-canary preflight SAM-12
+scripts/spur-codex-canary run SAM-12
+scripts/spur-codex-canary verify SAM-12
+scripts/spur-codex-canary checklist SAM-12
+```
+
+The canary status file defaults to
+`/tmp/spur-orchestrator/<SAM-id>-codex.json`. If
+`~/.spur/codex-harness` exists, `spur-codex-canary` exports it as
+`SPUR_HARNESS_CODEX_DIR` for discovery, preflight, and run commands. The
+wrapper sources `~/.spur/env` and also reads `spur-linear-api-key` and
+`spur-harness-github-token` from macOS Keychain when the matching env vars are
+unset.
