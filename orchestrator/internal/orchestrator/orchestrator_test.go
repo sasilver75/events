@@ -764,6 +764,102 @@ func TestRetryAttemptAndSessionArePassedToWorker(t *testing.T) {
 	t.Fatal("worker was not called")
 }
 
+func TestRetryTimerFireImmediatelyRedispatchesEligibleIssue(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
+	worker := &recordingWorker{result: WorkerResult{Status: domain.RunStatusSucceeded}}
+	o := New(nil, validConfig(), &fakeTracker{candidates: []domain.Issue{issue}}, worker, silentLogger())
+	o.state.Claimed[issue.ID] = struct{}{}
+	o.readySessions[issue.ID] = "sess-1"
+
+	o.onRetryFire(issue, 1)
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		worker.mu.Lock()
+		if len(worker.attempts) > 0 {
+			got := worker.attempts[0]
+			resume := worker.resumes[0]
+			worker.mu.Unlock()
+			if got == nil || *got != 1 {
+				t.Fatalf("attempt = %v, want 1", got)
+			}
+			if resume != "sess-1" {
+				t.Fatalf("resume session = %q, want sess-1", resume)
+			}
+			return
+		}
+		worker.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("retry timer did not immediately re-dispatch eligible issue")
+}
+
+func TestRetryTimerFireReleasesIneligibleIssueForNextTick(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
+	ineligible := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready"}
+	worker := &recordingWorker{result: WorkerResult{Status: domain.RunStatusSucceeded}}
+	o := New(nil, validConfig(), &fakeTracker{candidates: []domain.Issue{ineligible}}, worker, silentLogger())
+	o.state.Claimed[issue.ID] = struct{}{}
+
+	o.onRetryFire(issue, 1)
+
+	o.mu.Lock()
+	_, claimed := o.state.Claimed[issue.ID]
+	_, running := o.state.Running[issue.ID]
+	attempt, ready := o.readyAttempts[issue.ID]
+	o.mu.Unlock()
+	if claimed {
+		t.Fatal("ineligible retry issue remained claimed")
+	}
+	if running {
+		t.Fatal("ineligible retry issue was dispatched")
+	}
+	if !ready || attempt != 1 {
+		t.Fatalf("ready attempt = %d/%v, want 1/true", attempt, ready)
+	}
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	if len(worker.calls) != 0 {
+		t.Fatalf("worker calls = %v, want none", worker.calls)
+	}
+}
+
+func TestRetryTimerFireReleasesCapacityConstrainedIssueForNextTick(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
+	running := domain.Issue{ID: "uuid-2", Identifier: "SAM-2", State: "Ready", Labels: []string{"afk"}}
+	worker := &recordingWorker{result: WorkerResult{Status: domain.RunStatusSucceeded}}
+	cfg := validConfig()
+	cfg.Agent.MaxConcurrentAgents = 1
+	o := New(nil, cfg, &fakeTracker{candidates: []domain.Issue{issue}}, worker, silentLogger())
+	o.state.Claimed[issue.ID] = struct{}{}
+	o.state.Running[running.ID] = domain.RunningEntry{Issue: running, StartedAt: time.Now()}
+
+	o.onRetryFire(issue, 1)
+
+	o.mu.Lock()
+	_, claimed := o.state.Claimed[issue.ID]
+	_, dispatched := o.state.Running[issue.ID]
+	attempt, ready := o.readyAttempts[issue.ID]
+	o.mu.Unlock()
+	if claimed {
+		t.Fatal("capacity-constrained retry issue remained claimed")
+	}
+	if dispatched {
+		t.Fatal("capacity-constrained retry issue was dispatched")
+	}
+	if !ready || attempt != 1 {
+		t.Fatalf("ready attempt = %d/%v, want 1/true", attempt, ready)
+	}
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	if len(worker.calls) != 0 {
+		t.Fatalf("worker calls = %v, want none", worker.calls)
+	}
+}
+
 func TestReconcile_CancelsTerminalRunAndCleansWorkspace(t *testing.T) {
 	t.Parallel()
 	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
