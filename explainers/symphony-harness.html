@@ -1,0 +1,2059 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spur Symphony Harness Explainer</title>
+<style>
+  :root {
+    --bg: #f7f5ef;
+    --paper: #ffffff;
+    --ink: #171717;
+    --muted: #62666d;
+    --line: #dcd8cf;
+    --line-strong: #aaa398;
+    --blue: #315f7d;
+    --green: #3f7b57;
+    --red: #a6463d;
+    --yellow: #b98525;
+    --violet: #66548f;
+    --teal: #237070;
+    --soft-blue: #e7eff3;
+    --soft-green: #e8f1ea;
+    --soft-red: #f4e7e4;
+    --soft-yellow: #f5eedf;
+    --soft-violet: #ece8f4;
+    --soft-teal: #e1efef;
+    --shadow: 0 16px 42px rgba(30, 28, 24, 0.12);
+    --mono: "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.5;
+    overflow: hidden;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  .deck {
+    height: 100vh;
+    display: grid;
+    grid-template-rows: 1fr auto;
+  }
+
+  .slides {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    padding: 40px 48px 72px;
+    opacity: 0;
+    transform: translateX(28px);
+    pointer-events: none;
+    transition: opacity 260ms ease, transform 260ms ease;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 22px;
+  }
+
+  .slide.active {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+
+  .slide.past {
+    transform: translateX(-28px);
+  }
+
+  .topline {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    align-items: flex-start;
+  }
+
+  .kicker {
+    color: var(--blue);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  h1, h2, h3, p { margin: 0; }
+  h1 {
+    max-width: 960px;
+    font-size: 44px;
+    line-height: 1.08;
+    font-weight: 760;
+    letter-spacing: 0;
+  }
+  h2 {
+    max-width: 980px;
+    font-size: 34px;
+    line-height: 1.12;
+    font-weight: 740;
+    letter-spacing: 0;
+  }
+  h3 {
+    font-size: 15px;
+    line-height: 1.25;
+    font-weight: 730;
+    letter-spacing: 0;
+  }
+
+  .lede {
+    max-width: 860px;
+    color: var(--muted);
+    font-size: 18px;
+    line-height: 1.55;
+    margin-top: 12px;
+  }
+
+  .content {
+    min-height: 0;
+    display: grid;
+    align-content: center;
+    gap: 22px;
+  }
+
+  .content.top { align-content: start; }
+
+  .grid {
+    display: grid;
+    gap: 16px;
+  }
+  .grid.two { grid-template-columns: 1fr 1fr; }
+  .grid.three { grid-template-columns: repeat(3, 1fr); }
+  .grid.four { grid-template-columns: repeat(4, 1fr); }
+  .grid.sidebar { grid-template-columns: 0.9fr 1.25fr; align-items: stretch; }
+  .grid.wide-left { grid-template-columns: 1.35fr 0.9fr; align-items: stretch; }
+
+  .panel {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 18px;
+    box-shadow: 0 4px 16px rgba(30, 28, 24, 0.05);
+  }
+
+  .panel.tight { padding: 14px; }
+  .panel.plain { box-shadow: none; background: transparent; }
+  .panel.dark {
+    background: #1f2428;
+    color: #f6f3ec;
+    border-color: #343b40;
+  }
+
+  .label {
+    font-size: 12px;
+    font-weight: 720;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  .panel p, .panel li {
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.48;
+  }
+  .panel strong { color: var(--ink); }
+  .dark p, .dark li, .dark .label { color: #c7cbd0; }
+  .dark strong { color: #ffffff; }
+
+  ul.clean {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 9px;
+  }
+
+  .bullets {
+    margin: 0;
+    padding-left: 20px;
+    display: grid;
+    gap: 7px;
+  }
+
+  .pillrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    font-size: 12px;
+    font-weight: 680;
+    background: var(--paper);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .blue { color: var(--blue); }
+  .green { color: var(--green); }
+  .red { color: var(--red); }
+  .yellow { color: var(--yellow); }
+  .violet { color: var(--violet); }
+  .teal { color: var(--teal); }
+  .bg-blue { background: var(--soft-blue); border-color: #c9d8e1; }
+  .bg-green { background: var(--soft-green); border-color: #c9decf; }
+  .bg-red { background: var(--soft-red); border-color: #e2c3bd; }
+  .bg-yellow { background: var(--soft-yellow); border-color: #e7d6b8; }
+  .bg-violet { background: var(--soft-violet); border-color: #d6cde7; }
+  .bg-teal { background: var(--soft-teal); border-color: #c2dddd; }
+
+  code, pre {
+    font-family: var(--mono);
+  }
+  code {
+    padding: 1px 5px;
+    border-radius: 5px;
+    background: rgba(0,0,0,0.05);
+    color: #202225;
+    font-size: 0.92em;
+  }
+  pre {
+    margin: 0;
+    white-space: pre-wrap;
+    font-size: 12px;
+    line-height: 1.45;
+    overflow: auto;
+  }
+
+  .diagram {
+    width: 100%;
+    min-height: 270px;
+    position: relative;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background:
+      linear-gradient(90deg, rgba(0,0,0,0.035) 1px, transparent 1px) 0 0 / 32px 32px,
+      linear-gradient(rgba(0,0,0,0.035) 1px, transparent 1px) 0 0 / 32px 32px,
+      #fbfaf6;
+    overflow: hidden;
+  }
+
+  .diagram svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .node {
+    fill: #ffffff;
+    stroke: #bdb7ac;
+    stroke-width: 1.2;
+    rx: 8;
+  }
+  .node.blue { fill: var(--soft-blue); stroke: #adc5d4; }
+  .node.green { fill: var(--soft-green); stroke: #b5d2bf; }
+  .node.yellow { fill: var(--soft-yellow); stroke: #dcc391; }
+  .node.violet { fill: var(--soft-violet); stroke: #c9bddf; }
+  .node.red { fill: var(--soft-red); stroke: #d6aaa2; }
+  .node.teal { fill: var(--soft-teal); stroke: #abcfcf; }
+  .txt { font: 700 13px var(--sans); fill: #202225; }
+  .subtxt { font: 500 11px var(--sans); fill: #60656c; }
+  .tiny { font: 500 10px var(--sans); fill: #60656c; }
+  .edge {
+    fill: none;
+    stroke: #6c7177;
+    stroke-width: 1.6;
+    marker-end: url(#arrow);
+  }
+  .edge.blue { stroke: var(--blue); }
+  .edge.green { stroke: var(--green); }
+  .edge.red { stroke: var(--red); }
+  .edge.dashed { stroke-dasharray: 6 5; }
+
+  .pulse {
+    animation: pulse 2.6s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.55; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.03); }
+  }
+
+  .flow-dot {
+    offset-path: path("M 25 120 C 150 40, 260 40, 385 120 S 620 200, 760 120");
+    animation: travel 5.2s linear infinite;
+  }
+  @keyframes travel {
+    from { offset-distance: 0%; }
+    to { offset-distance: 100%; }
+  }
+
+  .timeline {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 8px;
+    align-items: stretch;
+  }
+  .step {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px;
+    background: var(--paper);
+    min-height: 118px;
+  }
+  .step .num {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--blue);
+    margin-bottom: 8px;
+  }
+  .step h3 { font-size: 13px; margin-bottom: 6px; }
+  .step p { font-size: 12px; color: var(--muted); line-height: 1.35; }
+
+  .split-title {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    padding: 9px 8px;
+    vertical-align: top;
+  }
+  th {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .metric {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px;
+    background: var(--paper);
+  }
+  .metric .value {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 760;
+    margin-bottom: 3px;
+  }
+  .metric .caption {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .toc-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .toc-item {
+    border: 1px solid var(--line);
+    background: var(--paper);
+    border-radius: 8px;
+    padding: 14px;
+    min-height: 112px;
+  }
+  .toc-item .num {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--blue);
+    margin-bottom: 8px;
+  }
+  .toc-item p {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.4;
+    margin-top: 5px;
+  }
+
+  .swimlane {
+    display: grid;
+    grid-template-columns: 120px repeat(6, 1fr);
+    gap: 8px;
+    align-items: stretch;
+  }
+  .lane-label {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px;
+    background: #fbfaf6;
+    font-weight: 740;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .lane-cell {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px;
+    background: var(--paper);
+    min-height: 80px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .lane-cell strong {
+    display: block;
+    color: var(--ink);
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  .lane-cell.empty {
+    background: transparent;
+    border-style: dashed;
+    opacity: 0.55;
+  }
+
+  .state-machine {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    align-items: center;
+  }
+  .state {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--paper);
+    padding: 14px;
+    min-height: 110px;
+    position: relative;
+  }
+  .state::after {
+    content: ">";
+    position: absolute;
+    right: -18px;
+    top: 42px;
+    color: var(--line-strong);
+    font-family: var(--mono);
+    font-weight: 700;
+  }
+  .state:last-child::after,
+  .state.break::after {
+    content: "";
+  }
+  .state p {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.4;
+    margin-top: 6px;
+  }
+
+  .controls {
+    height: 48px;
+    border-top: 1px solid var(--line);
+    background: rgba(247,245,239,0.96);
+    display: grid;
+    grid-template-columns: auto minmax(140px, 280px) 1fr auto;
+    align-items: center;
+    gap: 18px;
+    padding: 8px 20px;
+  }
+  .nav {
+    display: flex;
+    gap: 8px;
+  }
+  .nav button {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--line-strong);
+    background: var(--paper);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .nav button:hover { border-color: var(--blue); color: var(--blue); }
+  .progress {
+    height: 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    overflow: hidden;
+    background: #e9e4db;
+  }
+  .bar {
+    height: 100%;
+    width: 0;
+    background: var(--blue);
+    transition: width 200ms ease;
+  }
+  .counter {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    min-width: 78px;
+    text-align: right;
+  }
+  .current-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .footer-note {
+    position: absolute;
+    left: 48px;
+    bottom: 22px;
+    right: 48px;
+    display: flex;
+    justify-content: space-between;
+    gap: 18px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .source {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .source a { color: var(--blue); text-decoration: none; }
+  .source a:hover { text-decoration: underline; }
+
+  .status-list {
+    display: grid;
+    gap: 8px;
+  }
+  .status-row {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 12px;
+    align-items: start;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .status-row:last-child { border-bottom: 0; }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 5px;
+    border: 1px solid var(--line);
+    padding: 3px 7px;
+    font-family: var(--mono);
+    font-size: 11px;
+    background: #fbfaf6;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .callout {
+    border-left: 4px solid var(--blue);
+    padding: 12px 14px;
+    background: var(--soft-blue);
+    border-radius: 0 8px 8px 0;
+  }
+  .callout p { color: #283c4a; font-size: 14px; }
+
+  .centered {
+    text-align: center;
+    justify-items: center;
+  }
+  .centered .lede { margin-left: auto; margin-right: auto; }
+
+  @media (max-width: 960px) {
+    body { overflow: auto; }
+    .deck { min-height: 100vh; height: auto; }
+    .slides { overflow: visible; }
+    .slide {
+      position: relative;
+      display: none;
+      min-height: calc(100vh - 48px);
+      padding: 28px 20px 72px;
+    }
+    .slide.active { display: grid; }
+    h1 { font-size: 34px; }
+    h2 { font-size: 28px; }
+    .grid.two, .grid.three, .grid.four, .grid.sidebar, .grid.wide-left {
+      grid-template-columns: 1fr;
+    }
+    .timeline { grid-template-columns: 1fr 1fr; }
+    .toc-grid { grid-template-columns: 1fr; }
+    .swimlane { grid-template-columns: 1fr; }
+    .state-machine { grid-template-columns: 1fr; }
+    .state::after { display: none; }
+    .controls { grid-template-columns: auto 1fr auto; }
+    .current-title { display: none; }
+    .footer-note { left: 20px; right: 20px; flex-direction: column; gap: 4px; }
+  }
+
+  @media print {
+    body { overflow: visible; background: white; }
+    .deck { display: block; height: auto; }
+    .slides { overflow: visible; }
+    .slide {
+      position: relative;
+      opacity: 1;
+      transform: none;
+      page-break-after: always;
+      min-height: 100vh;
+      pointer-events: auto;
+    }
+    .controls { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="deck">
+  <main class="slides" id="slides">
+
+    <section class="slide active" data-title="Title">
+      <div class="topline">
+        <div>
+          <div class="kicker">Spur agent harness</div>
+          <h1>How the Symphony-inspired Codex harness works</h1>
+          <p class="lede">A high-level and end-to-end map of the system that turns Linear issues into isolated macOS agent runs, PRs, telemetry, and handoff state.</p>
+        </div>
+        <span class="pill bg-blue">HTML explainer deck</span>
+      </div>
+      <div class="content centered">
+        <div class="diagram" style="max-width: 980px;">
+          <svg viewBox="0 0 980 330" role="img" aria-label="High-level system loop">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7177"></path>
+              </marker>
+            </defs>
+            <rect class="node blue" x="34" y="108" width="152" height="88"></rect>
+            <text class="txt" x="110" y="142" text-anchor="middle">Linear</text>
+            <text class="subtxt" x="110" y="163" text-anchor="middle">Ready + AFK issues</text>
+            <rect class="node green pulse" x="270" y="76" width="190" height="152"></rect>
+            <text class="txt" x="365" y="123" text-anchor="middle">Go orchestrator</text>
+            <text class="subtxt" x="365" y="145" text-anchor="middle">poll, filter, dispatch</text>
+            <text class="subtxt" x="365" y="166" text-anchor="middle">reload WORKFLOW.md</text>
+            <text class="subtxt" x="365" y="187" text-anchor="middle">write status JSON</text>
+            <rect class="node yellow" x="545" y="86" width="170" height="132"></rect>
+            <text class="txt" x="630" y="127" text-anchor="middle">Tart VM</text>
+            <text class="subtxt" x="630" y="149" text-anchor="middle">per issue macOS</text>
+            <text class="subtxt" x="630" y="170" text-anchor="middle">Xcode + Simulator</text>
+            <rect class="node violet" x="785" y="108" width="152" height="88"></rect>
+            <text class="txt" x="861" y="142" text-anchor="middle">Codex</text>
+            <text class="subtxt" x="861" y="163" text-anchor="middle">app-server turn</text>
+            <path class="edge" d="M 186 152 H 270"></path>
+            <path class="edge" d="M 460 152 H 545"></path>
+            <path class="edge" d="M 715 152 H 785"></path>
+            <path class="edge green dashed" d="M 848 196 C 790 280, 205 280, 110 196"></path>
+            <circle class="flow-dot" cx="0" cy="0" r="7" fill="#315f7d"></circle>
+            <text class="tiny" x="490" y="300" text-anchor="middle">Result loops back as PR, comments, state, telemetry</text>
+          </svg>
+        </div>
+        <div class="source">Reference shape: OpenAI Symphony SPEC.md. Spur adaptation: repo-owned <code>WORKFLOW.md</code>, Go orchestrator, Tart macOS VMs, Codex runner.</div>
+      </div>
+      <div class="footer-note"><span>Use left/right arrows, space, or the buttons below.</span><span>Goal: operator mental model, not API reference.</span></div>
+    </section>
+
+    <section class="slide" data-title="Reading Path">
+      <div>
+        <div class="kicker">How to read this deck</div>
+        <h2>Build the model in layers: purpose, boundaries, flow, then proof.</h2>
+        <p class="lede">The system is easier to understand if you do not start with code packages. Start with the jobs each boundary performs, then zoom into the run loop and agent protocol.</p>
+      </div>
+      <div class="content top">
+        <div class="toc-grid">
+          <div class="toc-item bg-blue"><div class="num">01</div><h3>Purpose</h3><p>Why a normal local prompt or Linux container is not enough for unattended iOS work.</p></div>
+          <div class="toc-item bg-green"><div class="num">02</div><h3>Control plane</h3><p>How Linear, eligibility policy, and issue states decide what may run.</p></div>
+          <div class="toc-item bg-yellow"><div class="num">03</div><h3>Execution plane</h3><p>How the orchestrator creates a Tart VM, runs hooks, and launches Codex.</p></div>
+          <div class="toc-item bg-violet"><div class="num">04</div><h3>Agent plane</h3><p>How the Codex app-server runner handles sessions, turns, dynamic tools, and telemetry.</p></div>
+          <div class="toc-item bg-teal"><div class="num">05</div><h3>Evidence plane</h3><p>Where logs, JSON status, PRs, Linear comments, and canary artifacts prove what happened.</p></div>
+          <div class="toc-item bg-red"><div class="num">06</div><h3>Failure paths</h3><p>How retries, cancellation, terminal cleanup, and Needs Human escalation keep failures bounded.</p></div>
+        </div>
+        <div class="callout">
+          <p><strong>Key intuition:</strong> the orchestrator is not a smarter agent. It is the control shell around the agent: policy in, isolated work out, evidence back.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="One Sentence">
+      <div>
+        <div class="kicker">Core idea</div>
+        <h2>The harness is a long-running issue reader and isolated agent launcher.</h2>
+        <p class="lede">It does not replace Linear, GitHub, Codex, or the repo. It coordinates them: Linear chooses work, GitHub receives code, Codex does the task, and the orchestrator enforces the execution envelope.</p>
+      </div>
+      <div class="content">
+        <div class="grid four">
+          <div class="panel bg-blue">
+            <div class="label">Tracker</div>
+            <h3>Linear is the control plane</h3>
+            <p>Issues become runnable only when they match the repo policy: active state, AFK label, no HITL label, blockers done, and inside the Spur project.</p>
+          </div>
+          <div class="panel bg-green">
+            <div class="label">Scheduler</div>
+            <h3>Go orchestrator is the authority</h3>
+            <p>It polls Linear, claims eligible issues, starts bounded workers, retries or continues turns, and cancels work that stops being eligible.</p>
+          </div>
+          <div class="panel bg-yellow">
+            <div class="label">Workspace</div>
+            <h3>Tart gives each issue a Mac</h3>
+            <p>The workspace is a per-issue macOS VM clone, not a directory or Docker container. This is what makes iOS work possible.</p>
+          </div>
+          <div class="panel bg-violet">
+            <div class="label">Runner</div>
+            <h3>Codex app-server does the turn</h3>
+            <p>Codex receives the rendered issue prompt, talks through the app-server protocol, and can use host-proxied tools such as Linear GraphQL.</p>
+          </div>
+        </div>
+        <div class="callout">
+          <p><strong>Boundary:</strong> the orchestrator schedules, isolates, and records. The agent still owns normal issue comments, PR creation, and Linear closeout because those are part of the work contract in <code>WORKFLOW.md</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Why Exists">
+      <div>
+        <div class="kicker">Why this exists</div>
+        <h2>Spur needs a coding-agent service that can really run iOS work.</h2>
+        <p class="lede">A normal Linux sandbox is not enough. The harness must support Xcode, the iOS Simulator, codesign, Supabase, Docker/Colima, Go, GitHub PRs, and Linear handoff.</p>
+      </div>
+      <div class="content">
+        <div class="grid.sidebar">
+          <div class="panel">
+            <div class="label">The failure mode without a harness</div>
+            <ul class="bullets">
+              <li>Agents pick arbitrary work or skip tracker policy.</li>
+              <li>Tooling state leaks between tasks.</li>
+              <li>Credentials are copied ad hoc.</li>
+              <li>Finished code may never get a PR or Linear closeout.</li>
+              <li>Long-running attempts are hard to observe.</li>
+            </ul>
+          </div>
+          <div class="diagram">
+            <svg viewBox="0 0 760 280" role="img" aria-label="Before and after harness">
+              <defs>
+                <marker id="arrow2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7177"></path>
+                </marker>
+              </defs>
+              <text class="txt" x="130" y="40" text-anchor="middle">Ad hoc agent run</text>
+              <rect class="node red" x="40" y="70" width="180" height="62"></rect>
+              <text class="txt" x="130" y="96" text-anchor="middle">local prompt</text>
+              <text class="subtxt" x="130" y="116" text-anchor="middle">manual context</text>
+              <rect class="node red" x="40" y="158" width="180" height="62"></rect>
+              <text class="txt" x="130" y="184" text-anchor="middle">unclear closeout</text>
+              <text class="subtxt" x="130" y="204" text-anchor="middle">human chases state</text>
+              <path class="edge red dashed" marker-end="url(#arrow2)" d="M 130 132 V 158"></path>
+
+              <text class="txt" x="520" y="40" text-anchor="middle">Harnessed issue run</text>
+              <rect class="node blue" x="322" y="70" width="120" height="62"></rect>
+              <text class="txt" x="382" y="96" text-anchor="middle">Linear</text>
+              <text class="subtxt" x="382" y="116" text-anchor="middle">policy gate</text>
+              <rect class="node green" x="482" y="70" width="120" height="62"></rect>
+              <text class="txt" x="542" y="96" text-anchor="middle">orchestrator</text>
+              <text class="subtxt" x="542" y="116" text-anchor="middle">claim + run</text>
+              <rect class="node yellow" x="642" y="70" width="90" height="62"></rect>
+              <text class="txt" x="687" y="96" text-anchor="middle">VM</text>
+              <text class="subtxt" x="687" y="116" text-anchor="middle">isolated</text>
+              <rect class="node violet" x="482" y="166" width="120" height="62"></rect>
+              <text class="txt" x="542" y="192" text-anchor="middle">Codex</text>
+              <text class="subtxt" x="542" y="212" text-anchor="middle">does task</text>
+              <rect class="node green" x="322" y="166" width="120" height="62"></rect>
+              <text class="txt" x="382" y="192" text-anchor="middle">PR + status</text>
+              <text class="subtxt" x="382" y="212" text-anchor="middle">auditable</text>
+              <path class="edge" marker-end="url(#arrow2)" d="M 442 101 H 482"></path>
+              <path class="edge" marker-end="url(#arrow2)" d="M 602 101 H 642"></path>
+              <path class="edge" marker-end="url(#arrow2)" d="M 687 132 C 690 172, 640 197, 602 197"></path>
+              <path class="edge" marker-end="url(#arrow2)" d="M 482 197 H 442"></path>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Symphony Shape">
+      <div>
+        <div class="kicker">Reference shape</div>
+        <h2>Symphony gives the architectural vocabulary; Spur adapts the execution layer.</h2>
+        <p class="lede">The spec describes a tracker-driven service that creates isolated workspaces and runs coding agents from repo-owned workflow policy. Spur keeps that shape but swaps filesystem workspaces for macOS VMs.</p>
+      </div>
+      <div class="content">
+        <div class="grid.two">
+          <div class="panel">
+            <div class="split-title">
+              <h3>Reference Symphony</h3>
+              <span class="tag">portable agent service</span>
+            </div>
+            <table>
+              <tr><th>Concept</th><th>Reference</th></tr>
+              <tr><td>Tracker</td><td>Reads work from a tracker such as Linear.</td></tr>
+              <tr><td>Workspace</td><td>Creates isolated filesystem workspaces.</td></tr>
+              <tr><td>Workflow</td><td>Repo-owned <code>WORKFLOW.md</code> defines policy and prompt.</td></tr>
+              <tr><td>Runner</td><td>Codex app-server is the reference agent integration.</td></tr>
+              <tr><td>Tracker writes</td><td>Usually performed by the agent, not the scheduler.</td></tr>
+            </table>
+          </div>
+          <div class="panel">
+            <div class="split-title">
+              <h3>Spur harness</h3>
+              <span class="tag">iOS-capable adaptation</span>
+            </div>
+            <table>
+              <tr><th>Concept</th><th>Spur</th></tr>
+              <tr><td>Tracker</td><td>Linear project <code>Spur</code> with AFK/HITL policy.</td></tr>
+              <tr><td>Workspace</td><td>Per-issue Tart macOS VM clone.</td></tr>
+              <tr><td>Workflow</td><td>Same repo-owned contract, with hooks and Spur policy.</td></tr>
+              <tr><td>Runner</td><td>Codex app-server runner exists and was canary-proven.</td></tr>
+              <tr><td>Tracker writes</td><td>Agent owns normal handoff; orchestrator only has narrow escalation writes.</td></tr>
+            </table>
+          </div>
+        </div>
+        <p class="source">Source: <a href="https://github.com/openai/symphony/blob/main/SPEC.md">OpenAI Symphony SPEC.md</a> plus this repo's <code>docs/agents/harness.md</code>.</p>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Planes">
+      <div>
+        <div class="kicker">Mental model</div>
+        <h2>Think in planes: policy, control, execution, agent, evidence.</h2>
+        <p class="lede">Most confusion comes from mixing these together. The system is deliberately split so each plane can evolve without taking over the others.</p>
+      </div>
+      <div class="content">
+        <div class="grid.four">
+          <div class="panel bg-teal">
+            <div class="label">Policy plane</div>
+            <h3><code>WORKFLOW.md</code></h3>
+            <p>Defines eligibility states, hooks, runtime limits, credentials mode, and the per-issue instructions.</p>
+          </div>
+          <div class="panel bg-blue">
+            <div class="label">Control plane</div>
+            <h3>Linear + scheduler</h3>
+            <p>Linear stores work. The Go orchestrator polls, filters, claims, retries, cancels, and escalates.</p>
+          </div>
+          <div class="panel bg-yellow">
+            <div class="label">Execution plane</div>
+            <h3>Tart VM + hooks</h3>
+            <p>Each issue gets an isolated macOS environment with repo checkout, Xcode, Simulator, Go, and artifacts.</p>
+          </div>
+          <div class="panel bg-violet">
+            <div class="label">Agent plane</div>
+            <h3>Codex app-server</h3>
+            <p>Codex receives a rendered prompt, works inside the VM, calls dynamic tools, and emits protocol telemetry.</p>
+          </div>
+        </div>
+        <div class="grid.two">
+          <div class="panel bg-green">
+            <div class="label">Evidence plane</div>
+            <h3>PR, comments, logs, JSON</h3>
+            <p>GitHub PRs, Linear pickup/closeout comments, copied logs, status snapshots, and canary proof files are the audit trail.</p>
+          </div>
+          <div class="panel">
+            <div class="label">Debugging rule</div>
+            <p>When something fails, first ask which plane failed. A bad issue label is not a Codex bug. A missing PR is not a Tart bug. A missing status file is not a Linear bug.</p>
+            <div class="pillrow">
+              <span class="pill bg-teal">policy</span>
+              <span class="pill bg-blue">control</span>
+              <span class="pill bg-yellow">execution</span>
+              <span class="pill bg-violet">agent</span>
+              <span class="pill bg-green">evidence</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Component Map">
+      <div>
+        <div class="kicker">Component map</div>
+        <h2>The system is a small set of hard boundaries.</h2>
+        <p class="lede">Each piece has a narrow job. The design gets reliable by avoiding one mega-agent process that owns everything.</p>
+      </div>
+      <div class="content">
+        <div class="diagram">
+          <svg viewBox="0 0 980 420" role="img" aria-label="Component map">
+            <defs>
+              <marker id="arrow3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7177"></path>
+              </marker>
+            </defs>
+            <rect class="node blue" x="42" y="60" width="170" height="84"></rect>
+            <text class="txt" x="127" y="92" text-anchor="middle">Linear</text>
+            <text class="subtxt" x="127" y="113" text-anchor="middle">issues, states, labels</text>
+            <text class="subtxt" x="127" y="132" text-anchor="middle">comments</text>
+
+            <rect class="node green" x="290" y="42" width="200" height="120"></rect>
+            <text class="txt" x="390" y="82" text-anchor="middle">orchestrator</text>
+            <text class="subtxt" x="390" y="104" text-anchor="middle">poll loop, claims</text>
+            <text class="subtxt" x="390" y="124" text-anchor="middle">workers, retries</text>
+            <text class="subtxt" x="390" y="144" text-anchor="middle">status snapshots</text>
+
+            <rect class="node yellow" x="574" y="42" width="184" height="120"></rect>
+            <text class="txt" x="666" y="82" text-anchor="middle">workspace manager</text>
+            <text class="subtxt" x="666" y="104" text-anchor="middle">Tart clone/run/delete</text>
+            <text class="subtxt" x="666" y="124" text-anchor="middle">wait for SSH</text>
+
+            <rect class="node" x="802" y="60" width="140" height="84"></rect>
+            <text class="txt" x="872" y="92" text-anchor="middle">GitHub</text>
+            <text class="subtxt" x="872" y="113" text-anchor="middle">branch + PR</text>
+            <text class="subtxt" x="872" y="132" text-anchor="middle">CI checks</text>
+
+            <rect class="node teal" x="150" y="242" width="180" height="104"></rect>
+            <text class="txt" x="240" y="280" text-anchor="middle">WORKFLOW.md</text>
+            <text class="subtxt" x="240" y="302" text-anchor="middle">config + prompt</text>
+            <text class="subtxt" x="240" y="322" text-anchor="middle">runtime contract</text>
+
+            <rect class="node violet" x="420" y="228" width="214" height="132"></rect>
+            <text class="txt" x="527" y="268" text-anchor="middle">per-issue VM</text>
+            <text class="subtxt" x="527" y="290" text-anchor="middle">repo checkout</text>
+            <text class="subtxt" x="527" y="310" text-anchor="middle">Xcode, Simulator, Go</text>
+            <text class="subtxt" x="527" y="330" text-anchor="middle">Codex app-server</text>
+
+            <rect class="node red" x="720" y="242" width="180" height="104"></rect>
+            <text class="txt" x="810" y="280" text-anchor="middle">host tools</text>
+            <text class="subtxt" x="810" y="302" text-anchor="middle">linear_graphql</text>
+            <text class="subtxt" x="810" y="322" text-anchor="middle">status, logs, hooks</text>
+
+            <path class="edge" marker-end="url(#arrow3)" d="M 212 102 H 290"></path>
+            <path class="edge" marker-end="url(#arrow3)" d="M 490 102 H 574"></path>
+            <path class="edge" marker-end="url(#arrow3)" d="M 666 162 C 660 202, 610 230, 570 244"></path>
+            <path class="edge" marker-end="url(#arrow3)" d="M 330 294 H 420"></path>
+            <path class="edge" marker-end="url(#arrow3)" d="M 634 294 H 720"></path>
+            <path class="edge dashed" marker-end="url(#arrow3)" d="M 758 102 H 802"></path>
+            <path class="edge dashed" marker-end="url(#arrow3)" d="M 490 132 C 570 188, 725 200, 810 242"></path>
+            <path class="edge dashed" marker-end="url(#arrow3)" d="M 240 242 C 256 172, 320 152, 346 162"></path>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Repo Files">
+      <div>
+        <div class="kicker">Where the system lives</div>
+        <h2>There are policy files, mechanism packages, and operator scripts.</h2>
+      </div>
+      <div class="content top">
+        <div class="grid.three">
+          <div class="panel">
+            <div class="label">Policy</div>
+            <ul class="clean">
+              <li><strong><code>WORKFLOW.md</code></strong><br>Tracker config, active states, hooks, runner settings, credentials mode, and the per-issue task prompt.</li>
+              <li><strong><code>docs/agents/harness.md</code></strong><br>The human-readable architecture guide and Spur vs Symphony explanation.</li>
+              <li><strong><code>docs/agents/symphony-alignment-audit.md</code></strong><br>Evidence checklist for what is implemented and verified.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <div class="label">Mechanism</div>
+            <ul class="clean">
+              <li><strong><code>orchestrator/internal/workflow</code></strong><br>Loads front matter and renders the prompt.</li>
+              <li><strong><code>orchestrator/internal/tracker/linear</code></strong><br>Linear GraphQL reader plus narrow escalation writes.</li>
+              <li><strong><code>orchestrator/internal/workspace/tart</code></strong><br>VM lifecycle and hook execution.</li>
+              <li><strong><code>orchestrator/internal/agent</code></strong><br>Shared runner contract, Codex, Claude.</li>
+              <li><strong><code>orchestrator/internal/orchestrator</code></strong><br>Poll loop, dispatch, retry, cancellation, status.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <div class="label">Operations</div>
+            <ul class="clean">
+              <li><strong><code>scripts/spur-codex-canary</code></strong><br>Doctor, smoke, discover, preflight, run, verify, checklist.</li>
+              <li><strong><code>scripts/spur-snapshot-codex.sh</code></strong><br>Filtered Codex identity snapshot for VMs.</li>
+              <li><strong><code>scripts/spur-store-harness-secret</code></strong><br>Safer helper for storing Linear/GitHub harness secrets.</li>
+              <li><strong><code>/tmp/spur-orchestrator/*.json</code></strong><br>Status proof files when requested.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="callout">
+          <p><strong>Practical model:</strong> edit <code>WORKFLOW.md</code> when you want to change agent policy; edit <code>orchestrator/</code> when the scheduler or runner mechanics are wrong.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Workflow Contract">
+      <div>
+        <div class="kicker">WORKFLOW.md</div>
+        <h2>The workflow file is the contract between repo policy and runtime execution.</h2>
+        <p class="lede">It is deliberately versioned in the repo so the agent's operating instructions, eligibility rules, and hooks change with code review rather than invisible local configuration.</p>
+      </div>
+      <div class="content">
+        <div class="grid.sidebar">
+          <div class="panel dark">
+            <pre>tracker:
+  kind: linear
+  active_states:
+    - Ready
+    - In Progress
+
+workspace:
+  base_image: spur-base
+  root: ~/.tart/vms
+
+agent:
+  runner: claudecode
+  max_concurrent_agents: 2
+  max_turns: 20
+  max_unproductive_successes: 3
+
+credentials:
+  linear_access: vm_env
+
+codex:
+  command: codex app-server stdio</pre>
+          </div>
+          <div class="panel">
+            <div class="label">What it controls</div>
+            <div class="status-list">
+              <div class="status-row"><span class="tag">tracker</span><p>Which Linear project and states are considered active.</p></div>
+              <div class="status-row"><span class="tag">workspace</span><p>Which Tart base image is cloned for each issue.</p></div>
+              <div class="status-row"><span class="tag">hooks</span><p>What host-side shell runs after create, before run, after run, and before remove.</p></div>
+              <div class="status-row"><span class="tag">agent</span><p>Which runner is selected, concurrency limits, turn limits, retry behavior, and stuck-loop threshold.</p></div>
+              <div class="status-row"><span class="tag">prompt</span><p>The rendered task instructions that tell Codex how to pick up work, implement, verify, open a PR, and close out Linear.</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Reload">
+      <div>
+        <div class="kicker">Dynamic reload</div>
+        <h2>Workflow reload lets policy change without restarting the daemon.</h2>
+        <p class="lede">The orchestrator checks the file modification time on poll ticks. New prompt text, hooks, limits, active states, and timeouts apply to future runs.</p>
+      </div>
+      <div class="content">
+        <div class="diagram">
+          <svg viewBox="0 0 960 330" role="img" aria-label="Workflow reload">
+            <defs>
+              <marker id="arrow4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7177"></path>
+              </marker>
+            </defs>
+            <rect class="node teal" x="60" y="116" width="170" height="86"></rect>
+            <text class="txt" x="145" y="150" text-anchor="middle">WORKFLOW.md</text>
+            <text class="subtxt" x="145" y="171" text-anchor="middle">operator edits</text>
+            <rect class="node green pulse" x="320" y="80" width="210" height="158"></rect>
+            <text class="txt" x="425" y="123" text-anchor="middle">daemon tick</text>
+            <text class="subtxt" x="425" y="145" text-anchor="middle">stat file mtime</text>
+            <text class="subtxt" x="425" y="166" text-anchor="middle">parse config</text>
+            <text class="subtxt" x="425" y="187" text-anchor="middle">rebuild worker config</text>
+            <rect class="node blue" x="638" y="84" width="230" height="60"></rect>
+            <text class="txt" x="753" y="111" text-anchor="middle">safe live reload</text>
+            <text class="subtxt" x="753" y="130" text-anchor="middle">prompt, hooks, limits, states</text>
+            <rect class="node red" x="638" y="180" width="230" height="60"></rect>
+            <text class="txt" x="753" y="207" text-anchor="middle">guarded live reload</text>
+            <text class="subtxt" x="753" y="226" text-anchor="middle">runner class switch is skipped</text>
+            <path class="edge" marker-end="url(#arrow4)" d="M 230 159 H 320"></path>
+            <path class="edge green" marker-end="url(#arrow4)" d="M 530 124 H 638"></path>
+            <path class="edge red" marker-end="url(#arrow4)" d="M 530 190 H 638"></path>
+          </svg>
+        </div>
+        <div class="grid.three">
+          <div class="panel bg-green"><h3>Why it matters</h3><p>If a prompt is weak or a hook needs a path change, future runs can pick it up while the service keeps running.</p></div>
+          <div class="panel bg-yellow"><h3>What is guarded</h3><p>Switching between <code>claudecode</code> and <code>codex</code> requires restart or canary because the runner object is built at startup.</p></div>
+          <div class="panel bg-blue"><h3>What gets safer</h3><p>Operational policy can be tightened quickly when a real run exposes a gap, such as missing handoff comments.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Eligibility">
+      <div>
+        <div class="kicker">Linear eligibility</div>
+        <h2>Not every issue is runnable. The scheduler applies Spur policy before Codex sees anything.</h2>
+      </div>
+      <div class="content">
+        <div class="grid.wide-left">
+          <div class="diagram">
+            <svg viewBox="0 0 760 360" role="img" aria-label="Eligibility filter">
+              <defs>
+                <marker id="arrow5" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7177"></path>
+                </marker>
+              </defs>
+              <rect class="node blue" x="44" y="132" width="142" height="74"></rect>
+              <text class="txt" x="115" y="160" text-anchor="middle">Linear issues</text>
+              <text class="subtxt" x="115" y="181" text-anchor="middle">Spur project</text>
+              <path class="edge" marker-end="url(#arrow5)" d="M 186 169 H 238"></path>
+
+              <rect class="node" x="238" y="48" width="166" height="52"></rect>
+              <text class="txt" x="321" y="78" text-anchor="middle">Ready or In Progress</text>
+              <rect class="node" x="238" y="114" width="166" height="52"></rect>
+              <text class="txt" x="321" y="144" text-anchor="middle">AFK label present</text>
+              <rect class="node" x="238" y="180" width="166" height="52"></rect>
+              <text class="txt" x="321" y="210" text-anchor="middle">HITL label absent</text>
+              <rect class="node" x="238" y="246" width="166" height="52"></rect>
+              <text class="txt" x="321" y="276" text-anchor="middle">blockers are Done</text>
+
+              <path class="edge dashed" marker-end="url(#arrow5)" d="M 321 100 V 114"></path>
+              <path class="edge dashed" marker-end="url(#arrow5)" d="M 321 166 V 180"></path>
+              <path class="edge dashed" marker-end="url(#arrow5)" d="M 321 232 V 246"></path>
+
+              <path class="edge green" marker-end="url(#arrow5)" d="M 404 272 C 470 272, 472 169, 530 169"></path>
+              <rect class="node green pulse" x="530" y="132" width="166" height="74"></rect>
+              <text class="txt" x="613" y="160" text-anchor="middle">dispatch queue</text>
+              <text class="subtxt" x="613" y="181" text-anchor="middle">bounded by concurrency</text>
+            </svg>
+          </div>
+          <div class="panel">
+            <div class="label">Why so strict?</div>
+            <ul class="bullets">
+              <li><strong>Ready</strong> means the issue has enough spec to attempt.</li>
+              <li><strong>AFK</strong> means it is explicitly permitted for unattended agent work.</li>
+              <li><strong>No HITL</strong> means the issue does not require a human conversation first.</li>
+              <li><strong>Blockers Done</strong> prevents work from racing ahead of dependencies.</li>
+              <li><strong>Same gate for daemon and <code>--once</code></strong> prevents canary runs from bypassing policy.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Host vs VM">
+      <div>
+        <div class="kicker">Boundary map</div>
+        <h2>Host and VM responsibilities are intentionally different.</h2>
+        <p class="lede">The host coordinates and protects credentials. The VM contains the risky, mutable work area where the agent can run with broad permissions.</p>
+      </div>
+      <div class="content top">
+        <div class="swimlane">
+          <div class="lane-label">Phase</div>
+          <div class="lane-cell"><strong>Poll</strong>Find work</div>
+          <div class="lane-cell"><strong>Prepare</strong>Create workspace</div>
+          <div class="lane-cell"><strong>Before run</strong>Inject context</div>
+          <div class="lane-cell"><strong>Agent turn</strong>Implement</div>
+          <div class="lane-cell"><strong>After run</strong>Collect</div>
+          <div class="lane-cell"><strong>Cleanup</strong>Delete</div>
+
+          <div class="lane-label">Host</div>
+          <div class="lane-cell bg-blue"><strong>Linear API</strong>Fetch candidates and refresh states.</div>
+          <div class="lane-cell bg-yellow"><strong>Tart CLI</strong>Clone, boot, and wait for SSH.</div>
+          <div class="lane-cell bg-green"><strong>Hooks</strong>Copy issue JSON, GitHub token, Codex snapshot. Keep Linear host-held in <code>host_proxy</code>.</div>
+          <div class="lane-cell bg-red"><strong>Dynamic tools</strong>Serve <code>linear_graphql</code> requests from Codex.</div>
+          <div class="lane-cell bg-teal"><strong>Status</strong>Write logs and JSON snapshots.</div>
+          <div class="lane-cell bg-yellow"><strong>Final hook</strong>Collect artifacts and delete VM.</div>
+
+          <div class="lane-label">VM</div>
+          <div class="lane-cell empty">No direct polling.</div>
+          <div class="lane-cell bg-yellow"><strong>macOS guest</strong>Boots from <code>spur-base</code>.</div>
+          <div class="lane-cell bg-green"><strong>Repo checkout</strong>Receives current issue snapshot and agent identity.</div>
+          <div class="lane-cell bg-violet"><strong>Codex</strong>Edits files, runs tests, opens PR, comments on Linear via available tool path.</div>
+          <div class="lane-cell bg-teal"><strong>Logs</strong>Codex/Claude logs and build outputs are copied out.</div>
+          <div class="lane-cell bg-red"><strong>Disposable</strong>Terminal issues remove the VM.</div>
+        </div>
+        <div class="callout">
+          <p><strong>Safety posture:</strong> give the agent freedom inside the VM, but keep orchestration authority and the strongest credential boundary on the host.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Tart">
+      <div>
+        <div class="kicker">Workspace model</div>
+        <h2>Tart is the reason the agent can do real iOS work.</h2>
+        <p class="lede">Docker is excellent for Linux services. Tart gives this harness actual macOS guests, so the agent has the tools that only exist on macOS.</p>
+      </div>
+      <div class="content">
+        <div class="grid.two">
+          <div class="panel bg-yellow">
+            <h3>Tart VM</h3>
+            <ul class="bullets">
+              <li>Full macOS virtual machine on Apple Silicon.</li>
+              <li>Can run Xcode, iOS Simulator, Keychain, codesign, and native Apple tooling.</li>
+              <li>Heavier than Docker, but correct for iOS work.</li>
+              <li>Per-issue clone is named like <code>spur-ticket-SAM-54</code>.</li>
+            </ul>
+          </div>
+          <div class="panel bg-blue">
+            <h3>Docker container</h3>
+            <ul class="bullets">
+              <li>Lightweight Linux process isolation.</li>
+              <li>Great for Go services, Postgres clients, and many backend tasks.</li>
+              <li>Cannot run Xcode or iOS Simulator inside Linux.</li>
+              <li>On macOS, Docker itself runs Linux inside a hidden VM.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="timeline">
+          <div class="step"><div class="num">01</div><h3>clone</h3><p><code>tart clone</code> creates a copy-on-write VM from <code>spur-base</code>.</p></div>
+          <div class="step"><div class="num">02</div><h3>run</h3><p><code>tart run --no-graphics</code> boots the VM.</p></div>
+          <div class="step"><div class="num">03</div><h3>ip</h3><p>The manager waits until Tart reports an IP address.</p></div>
+          <div class="step"><div class="num">04</div><h3>ssh</h3><p>The manager checks port 22 before hooks run.</p></div>
+          <div class="step"><div class="num">05</div><h3>prepare</h3><p>Hooks clone the repo and copy identity snapshots.</p></div>
+          <div class="step"><div class="num">06</div><h3>execute</h3><p>Codex runs in the VM with the rendered prompt.</p></div>
+          <div class="step"><div class="num">07</div><h3>collect</h3><p>Logs and artifacts are copied back to the host.</p></div>
+          <div class="step"><div class="num">08</div><h3>delete</h3><p>Terminal issues trigger final artifact copy and VM deletion.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Hooks">
+      <div>
+        <div class="kicker">Lifecycle hooks</div>
+        <h2>Hooks are host-side shell scripts that prepare and clean the VM.</h2>
+        <p class="lede">They are declared in <code>WORKFLOW.md</code>, but run on the host with VM metadata in environment variables.</p>
+      </div>
+      <div class="content">
+        <div class="grid.four">
+          <div class="panel bg-blue">
+            <div class="label">after_create</div>
+            <h3>First clone setup</h3>
+            <p>Runs once for a new VM. Configures Git, clones the repo, checks out <code>main</code>, and pulls the latest code.</p>
+          </div>
+          <div class="panel bg-green">
+            <div class="label">before_run</div>
+            <h3>Every attempt setup</h3>
+            <p>Copies issue JSON, credentials boundary files, Codex or Claude identity snapshots, and refreshes Git remote auth.</p>
+          </div>
+          <div class="panel bg-yellow">
+            <div class="label">after_run</div>
+            <h3>Attempt artifact copy</h3>
+            <p>Copies Claude project logs, Codex logs, and issue snapshots out to the run log directory.</p>
+          </div>
+          <div class="panel bg-red">
+            <div class="label">before_remove</div>
+            <h3>Final artifact copy</h3>
+            <p>Runs before terminal VM deletion and copies build artifacts or final evidence back to the host.</p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="label">Hook environment</div>
+          <div class="pillrow">
+            <span class="pill"><code>SPUR_VM_NAME</code></span>
+            <span class="pill"><code>SPUR_VM_IP</code></span>
+            <span class="pill"><code>SPUR_ISSUE_ID</code></span>
+            <span class="pill"><code>SPUR_ISSUE_IDENTIFIER</code></span>
+            <span class="pill"><code>SPUR_ISSUE_JSON</code></span>
+            <span class="pill"><code>SPUR_GITHUB_TOKEN</code></span>
+            <span class="pill"><code>SPUR_LINEAR_TOKEN</code></span>
+            <span class="pill"><code>SPUR_RUN_LOG_DIR</code></span>
+            <span class="pill"><code>SPUR_SSH_KEY</code></span>
+            <span class="pill"><code>SPUR_HARNESS_CODEX_DIR</code></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Runner Contract">
+      <div>
+        <div class="kicker">Runner interface</div>
+        <h2>The orchestrator talks to runners through one shared contract.</h2>
+        <p class="lede">Claude and Codex are concrete implementations. The worker does not need to know every protocol detail; it needs a start/resume result, events, telemetry, and final status.</p>
+      </div>
+      <div class="content">
+        <div class="grid.two">
+          <div class="panel">
+            <div class="label">Shared concepts</div>
+            <table>
+              <tr><th>Field</th><th>Meaning</th></tr>
+              <tr><td><code>SessionID</code></td><td>Handle for a resumable agent session.</td></tr>
+              <tr><td><code>ThreadID</code></td><td>Codex app-server thread provenance.</td></tr>
+              <tr><td><code>TurnID</code></td><td>Specific Codex turn provenance.</td></tr>
+              <tr><td><code>Usage</code></td><td>Input, output, total tokens, and runtime seconds.</td></tr>
+              <tr><td><code>RateLimitSnapshot</code></td><td>Current plan/rate-limit telemetry when emitted.</td></tr>
+              <tr><td><code>DynamicTool</code></td><td>Host-side tool advertised to Codex, such as <code>linear_graphql</code>.</td></tr>
+            </table>
+          </div>
+          <div class="panel">
+            <div class="label">Concrete runners</div>
+            <div class="status-list">
+              <div class="status-row"><span class="tag">codex</span><p>Starts <code>codex app-server</code> over SSH, initializes JSON-RPC, starts or resumes a thread, starts a turn, handles dynamic tool requests, and captures telemetry.</p></div>
+              <div class="status-row"><span class="tag">claudecode</span><p>Streams Claude Code headless output over SSH and now fits the same result/event model. Useful as legacy fallback, but not where future investment should go if Codex is the production direction.</p></div>
+            </div>
+          </div>
+        </div>
+        <div class="callout">
+          <p><strong>Why this matters:</strong> the scheduler can stay stable while the concrete agent runtime changes. That is what made adding Codex possible without rewriting the orchestrator loop.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Codex Protocol">
+      <div>
+        <div class="kicker">Codex app-server runner</div>
+        <h2>Codex is not invoked as a blind one-shot command; it is a protocol peer.</h2>
+      </div>
+      <div class="content">
+        <div class="diagram">
+          <svg viewBox="0 0 980 370" role="img" aria-label="Codex app-server protocol flow">
+            <defs>
+              <marker id="arrow6" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7177"></path>
+              </marker>
+            </defs>
+            <rect class="node green" x="48" y="72" width="170" height="230"></rect>
+            <text class="txt" x="133" y="116" text-anchor="middle">worker</text>
+            <text class="subtxt" x="133" y="140" text-anchor="middle">rendered prompt</text>
+            <text class="subtxt" x="133" y="160" text-anchor="middle">env + tools</text>
+            <text class="subtxt" x="133" y="180" text-anchor="middle">timeout</text>
+
+            <rect class="node yellow" x="306" y="72" width="170" height="230"></rect>
+            <text class="txt" x="391" y="116" text-anchor="middle">SSH</text>
+            <text class="subtxt" x="391" y="140" text-anchor="middle">admin@VM</text>
+            <text class="subtxt" x="391" y="160" text-anchor="middle">stdin/stdout</text>
+            <text class="subtxt" x="391" y="180" text-anchor="middle">JSON-RPC</text>
+
+            <rect class="node violet pulse" x="564" y="72" width="190" height="230"></rect>
+            <text class="txt" x="659" y="116" text-anchor="middle">codex app-server</text>
+            <text class="subtxt" x="659" y="140" text-anchor="middle">initialize</text>
+            <text class="subtxt" x="659" y="160" text-anchor="middle">thread/start or resume</text>
+            <text class="subtxt" x="659" y="180" text-anchor="middle">turn/start</text>
+            <text class="subtxt" x="659" y="200" text-anchor="middle">turn_completed</text>
+
+            <rect class="node red" x="822" y="102" width="120" height="170"></rect>
+            <text class="txt" x="882" y="142" text-anchor="middle">host tools</text>
+            <text class="subtxt" x="882" y="166" text-anchor="middle">linear_graphql</text>
+            <text class="subtxt" x="882" y="186" text-anchor="middle">approval cancel</text>
+            <text class="subtxt" x="882" y="206" text-anchor="middle">unsupported reject</text>
+
+            <path class="edge" marker-end="url(#arrow6)" d="M 218 187 H 306"></path>
+            <path class="edge" marker-end="url(#arrow6)" d="M 476 187 H 564"></path>
+            <path class="edge dashed red" marker-end="url(#arrow6)" d="M 754 160 H 822"></path>
+            <path class="edge dashed red" marker-end="url(#arrow6)" d="M 822 214 H 754"></path>
+            <path class="edge green dashed" marker-end="url(#arrow6)" d="M 610 302 C 520 350, 270 350, 162 302"></path>
+            <text class="tiny" x="392" y="338" text-anchor="middle">events, session IDs, token usage, rate limits, final status</text>
+          </svg>
+        </div>
+        <div class="grid.three">
+          <div class="panel"><h3>What gets captured</h3><p>Session ID, thread ID, turn ID, completion or error event, token usage, and rate-limit snapshots.</p></div>
+          <div class="panel"><h3>What gets advertised</h3><p>Dynamic tools are sent on both thread start and resume so continuation turns keep host-side capabilities.</p></div>
+          <div class="panel"><h3>What gets rejected</h3><p>Unsupported app-server requests are rejected rather than silently hanging; approval requests are answered with a cancel decision.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Credentials">
+      <div>
+        <div class="kicker">Credential boundary</div>
+        <h2>Codex enables a better Linear secret boundary.</h2>
+        <p class="lede">The old mode injected Linear into the VM. The Codex mode can keep Linear on the host and expose only a narrow GraphQL tool to the agent.</p>
+      </div>
+      <div class="content">
+        <div class="grid.two">
+          <div class="panel bg-red">
+            <div class="label">vm_env</div>
+            <h3>Token enters the VM</h3>
+            <ul class="bullets">
+              <li>Hook writes <code>LINEAR_API_KEY</code> for agent use.</li>
+              <li>Works for simple CLI/API calls.</li>
+              <li>Higher blast radius if the VM or task goes wrong.</li>
+              <li>Still the literal default in the merged <code>WORKFLOW.md</code> until you flip production.</li>
+            </ul>
+          </div>
+          <div class="panel bg-green">
+            <div class="label">host_proxy</div>
+            <h3>Token stays on the host</h3>
+            <ul class="bullets">
+              <li>Worker omits <code>LINEAR_API_KEY</code> from Codex environment.</li>
+              <li>Hook receives empty <code>SPUR_LINEAR_TOKEN</code>.</li>
+              <li>Codex receives <code>linear_graphql</code> dynamic tool.</li>
+              <li>Supported only for <code>agent.runner: codex</code>.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="diagram">
+          <svg viewBox="0 0 980 220" role="img" aria-label="Host proxy credential flow">
+            <defs>
+              <marker id="arrow7" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7177"></path>
+              </marker>
+            </defs>
+            <rect class="node green" x="52" y="64" width="180" height="92"></rect>
+            <text class="txt" x="142" y="100" text-anchor="middle">host orchestrator</text>
+            <text class="subtxt" x="142" y="122" text-anchor="middle">holds Linear key</text>
+            <rect class="node violet" x="410" y="64" width="180" height="92"></rect>
+            <text class="txt" x="500" y="100" text-anchor="middle">Codex in VM</text>
+            <text class="subtxt" x="500" y="122" text-anchor="middle">calls linear_graphql</text>
+            <rect class="node blue" x="748" y="64" width="180" height="92"></rect>
+            <text class="txt" x="838" y="100" text-anchor="middle">Linear API</text>
+            <text class="subtxt" x="838" y="122" text-anchor="middle">GraphQL request</text>
+            <path class="edge dashed" marker-end="url(#arrow7)" d="M 590 96 C 640 50, 700 50, 748 96"></path>
+            <path class="edge green" marker-end="url(#arrow7)" d="M 232 120 C 332 190, 650 190, 748 120"></path>
+            <text class="tiny" x="490" y="196" text-anchor="middle">The VM asks for a Linear operation; the host performs it with the host-held key.</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Poll Loop">
+      <div>
+        <div class="kicker">Main daemon loop</div>
+        <h2>The orchestrator loop is boring on purpose.</h2>
+        <p class="lede">Every tick reconciles known work, reads Linear, filters candidates, dispatches up to the concurrency cap, and records what happened.</p>
+      </div>
+      <div class="content">
+        <div class="timeline">
+          <div class="step"><div class="num">tick</div><h3>reload</h3><p>Check <code>WORKFLOW.md</code> mtime and update safe runtime fields.</p></div>
+          <div class="step"><div class="num">01</div><h3>refresh</h3><p>Re-fetch state for running issues and terminal candidates.</p></div>
+          <div class="step"><div class="num">02</div><h3>cancel</h3><p>Stop active runs that became terminal or left active states.</p></div>
+          <div class="step"><div class="num">03</div><h3>cleanup</h3><p>Run <code>before_remove</code> and delete terminal VMs.</p></div>
+          <div class="step"><div class="num">04</div><h3>fetch</h3><p>Fetch candidate issues from Linear.</p></div>
+          <div class="step"><div class="num">05</div><h3>filter</h3><p>Apply AFK, HITL, blockers, project, and running-claim checks.</p></div>
+          <div class="step"><div class="num">06</div><h3>dispatch</h3><p>Start workers up to <code>max_concurrent_agents</code>.</p></div>
+          <div class="step"><div class="num">07</div><h3>snapshot</h3><p>Write logs and optional JSON status.</p></div>
+        </div>
+        <div class="grid.three">
+          <div class="metric"><div class="value">30s</div><div class="caption">default polling interval</div></div>
+          <div class="metric"><div class="value">2</div><div class="caption">macOS guest concurrency cap</div></div>
+          <div class="metric"><div class="value">20</div><div class="caption">default max turns per issue</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Worker Run">
+      <div>
+        <div class="kicker">One worker run</div>
+        <h2>A worker is one claimed issue moving through one agent attempt.</h2>
+      </div>
+      <div class="content">
+        <div class="diagram">
+          <svg viewBox="0 0 980 350" role="img" aria-label="Worker run sequence">
+            <defs>
+              <marker id="arrow8" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7177"></path>
+              </marker>
+            </defs>
+            <path d="M 70 175 H 910" fill="none" stroke="#bdb7ac" stroke-width="4"></path>
+            <g>
+              <circle cx="90" cy="175" r="25" fill="#e7eff3" stroke="#adc5d4"></circle>
+              <text class="txt" x="90" y="180" text-anchor="middle">1</text>
+              <text class="subtxt" x="90" y="225" text-anchor="middle">claim</text>
+            </g>
+            <g>
+              <circle cx="205" cy="175" r="25" fill="#e8f1ea" stroke="#b5d2bf"></circle>
+              <text class="txt" x="205" y="180" text-anchor="middle">2</text>
+              <text class="subtxt" x="205" y="225" text-anchor="middle">ensure VM</text>
+            </g>
+            <g>
+              <circle cx="320" cy="175" r="25" fill="#f5eedf" stroke="#dcc391"></circle>
+              <text class="txt" x="320" y="180" text-anchor="middle">3</text>
+              <text class="subtxt" x="320" y="225" text-anchor="middle">hooks</text>
+            </g>
+            <g>
+              <circle cx="435" cy="175" r="25" fill="#ece8f4" stroke="#c9bddf"></circle>
+              <text class="txt" x="435" y="180" text-anchor="middle">4</text>
+              <text class="subtxt" x="435" y="225" text-anchor="middle">render prompt</text>
+            </g>
+            <g>
+              <circle cx="550" cy="175" r="25" fill="#ece8f4" stroke="#c9bddf"></circle>
+              <text class="txt" x="550" y="180" text-anchor="middle">5</text>
+              <text class="subtxt" x="550" y="225" text-anchor="middle">Codex turn</text>
+            </g>
+            <g>
+              <circle cx="665" cy="175" r="25" fill="#e1efef" stroke="#abcfcf"></circle>
+              <text class="txt" x="665" y="180" text-anchor="middle">6</text>
+              <text class="subtxt" x="665" y="225" text-anchor="middle">collect logs</text>
+            </g>
+            <g>
+              <circle cx="780" cy="175" r="25" fill="#e8f1ea" stroke="#b5d2bf"></circle>
+              <text class="txt" x="780" y="180" text-anchor="middle">7</text>
+              <text class="subtxt" x="780" y="225" text-anchor="middle">integrate</text>
+            </g>
+            <g>
+              <circle cx="895" cy="175" r="25" fill="#f4e7e4" stroke="#d6aaa2"></circle>
+              <text class="txt" x="895" y="180" text-anchor="middle">8</text>
+              <text class="subtxt" x="895" y="225" text-anchor="middle">retry or done</text>
+            </g>
+            <path class="edge" marker-end="url(#arrow8)" d="M 115 175 H 180"></path>
+            <path class="edge" marker-end="url(#arrow8)" d="M 230 175 H 295"></path>
+            <path class="edge" marker-end="url(#arrow8)" d="M 345 175 H 410"></path>
+            <path class="edge" marker-end="url(#arrow8)" d="M 460 175 H 525"></path>
+            <path class="edge" marker-end="url(#arrow8)" d="M 575 175 H 640"></path>
+            <path class="edge" marker-end="url(#arrow8)" d="M 690 175 H 755"></path>
+            <path class="edge" marker-end="url(#arrow8)" d="M 805 175 H 870"></path>
+          </svg>
+        </div>
+        <div class="grid.three">
+          <div class="panel"><h3>Success path</h3><p>Agent opens PR, comments on Linear, moves issue to <code>In Review</code>. Orchestrator records success and releases the worker.</p></div>
+          <div class="panel"><h3>Continuation path</h3><p>If work remains active and allowed turns remain, the next run can resume the prior session or reuse the same VM state.</p></div>
+          <div class="panel"><h3>Terminal path</h3><p>If Linear reaches <code>Done</code>, <code>Canceled</code>, or <code>Duplicate</code>, the VM is cleaned up.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Issue State Machine">
+      <div>
+        <div class="kicker">Linear state machine</div>
+        <h2>The harness is driven by issue state, not by a hidden job queue.</h2>
+        <p class="lede">Linear is the source of truth for whether work may start, keep running, needs review, is done, or requires a human decision.</p>
+      </div>
+      <div class="content">
+        <div class="state-machine">
+          <div class="state bg-blue">
+            <h3>Ready</h3>
+            <p>Eligible only if AFK is present, HITL absent, blockers Done, and issue is in the Spur project.</p>
+          </div>
+          <div class="state bg-green">
+            <h3>In Progress</h3>
+            <p>The agent has picked it up. The issue remains active while the VM and worker are alive.</p>
+          </div>
+          <div class="state bg-violet">
+            <h3>In Review</h3>
+            <p>The agent opened a PR and posted closeout. Human or CI review happens here.</p>
+          </div>
+          <div class="state bg-green">
+            <h3>Done</h3>
+            <p>Terminal. The orchestrator runs final artifact collection and removes the VM.</p>
+          </div>
+          <div class="state bg-red break">
+            <h3>Needs Human</h3>
+            <p>Side exit. Used when the agent needs a decision or the loop guard detects unproductive success.</p>
+          </div>
+        </div>
+        <div class="grid.three">
+          <div class="panel"><h3>Active states</h3><p><code>Ready</code> and <code>In Progress</code> are pollable states in <code>WORKFLOW.md</code>.</p></div>
+          <div class="panel"><h3>Review state</h3><p><code>In Review</code> is intentionally not active, so the orchestrator does not keep dispatching after PR handoff.</p></div>
+          <div class="panel"><h3>Terminal states</h3><p><code>Done</code>, <code>Canceled</code>, and <code>Duplicate</code> trigger cleanup.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Agent Handoff">
+      <div>
+        <div class="kicker">Agent-owned handoff</div>
+        <h2>The agent is responsible for closing the loop, not just writing code.</h2>
+        <p class="lede">This is why the prompt hardening matters. A code change without PR, comments, and Linear state is operationally incomplete.</p>
+      </div>
+      <div class="content">
+        <div class="grid.two">
+          <div class="panel">
+            <div class="label">Required before exit</div>
+            <ul class="bullets">
+              <li>Post pickup comment on the Linear issue.</li>
+              <li>Move issue to <code>In Progress</code> while work is active.</li>
+              <li>Create a branch and PR against <code>main</code>.</li>
+              <li>Post closeout comment with PR link, AC table, drift list, artifacts, and verification.</li>
+              <li>Move issue to <code>In Review</code> after the PR opens.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <div class="label">Why the orchestrator does not do it all</div>
+            <p>The scheduler does not know whether the implementation truly satisfies the ticket. The agent just did the work, saw the diff, ran the tests, and has the right context to explain the result. The orchestrator only steps in for narrow stuck-loop escalation.</p>
+            <div class="pillrow">
+              <span class="pill bg-blue">agent writes normal comments</span>
+              <span class="pill bg-green">agent opens PR</span>
+              <span class="pill bg-yellow">orchestrator records status</span>
+              <span class="pill bg-red">orchestrator escalates loops</span>
+            </div>
+          </div>
+        </div>
+        <div class="callout">
+          <p><strong>Definition of complete:</strong> code merged is not the only target. The issue needs an auditable path from Linear -> VM work -> PR -> verification -> Linear state.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Succeeding">
+      <div>
+        <div class="kicker">Stuck-loop guard</div>
+        <h2>"Successful" means the runner returned cleanly. It does not prove the ticket moved forward.</h2>
+        <p class="lede">The bad case is an agent that exits with success but leaves Linear active. Without a guard, the orchestrator would keep continuing until <code>max_turns</code>.</p>
+      </div>
+      <div class="content">
+        <div class="diagram">
+          <svg viewBox="0 0 960 330" role="img" aria-label="Stuck loop detection">
+            <defs>
+              <marker id="arrow9" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7177"></path>
+              </marker>
+            </defs>
+            <rect class="node violet" x="48" y="80" width="170" height="76"></rect>
+            <text class="txt" x="133" y="111" text-anchor="middle">turn completed</text>
+            <text class="subtxt" x="133" y="132" text-anchor="middle">runner status: success</text>
+            <rect class="node blue" x="314" y="80" width="170" height="76"></rect>
+            <text class="txt" x="399" y="111" text-anchor="middle">refresh Linear</text>
+            <text class="subtxt" x="399" y="132" text-anchor="middle">still active?</text>
+            <rect class="node yellow" x="580" y="80" width="170" height="76"></rect>
+            <text class="txt" x="665" y="111" text-anchor="middle">increment counter</text>
+            <text class="subtxt" x="665" y="132" text-anchor="middle">unproductive success</text>
+            <rect class="node red pulse" x="395" y="220" width="210" height="76"></rect>
+            <text class="txt" x="500" y="251" text-anchor="middle">Needs Human</text>
+            <text class="subtxt" x="500" y="272" text-anchor="middle">comment + state transition</text>
+            <path class="edge" marker-end="url(#arrow9)" d="M 218 118 H 314"></path>
+            <path class="edge" marker-end="url(#arrow9)" d="M 484 118 H 580"></path>
+            <path class="edge red" marker-end="url(#arrow9)" d="M 665 156 C 650 205, 600 230, 605 252"></path>
+            <path class="edge dashed" marker-end="url(#arrow9)" d="M 580 138 C 500 190, 210 190, 133 156"></path>
+            <text class="tiny" x="333" y="196" text-anchor="middle">continue until threshold if issue is still active</text>
+          </svg>
+        </div>
+        <div class="grid.three">
+          <div class="panel bg-green"><h3>Good success</h3><p>Runner exits, PR exists, closeout exists, issue is now <code>In Review</code> or terminal.</p></div>
+          <div class="panel bg-yellow"><h3>Suspicious success</h3><p>Runner exits cleanly, but issue remains <code>Ready</code> or <code>In Progress</code>.</p></div>
+          <div class="panel bg-red"><h3>Escalated success</h3><p>After <code>agent.max_unproductive_successes</code>, the orchestrator stops burning turns and moves the issue to <code>Needs Human</code>.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Sessions and Resume">
+      <div>
+        <div class="kicker">Resumability</div>
+        <h2>Sessions, threads, and turns are how a long task becomes inspectable.</h2>
+        <p class="lede">The Codex app-server path gives the harness stable identifiers for the overall session, the app-server thread, and the specific turn that produced a result.</p>
+      </div>
+      <div class="content">
+        <div class="grid.three">
+          <div class="panel bg-violet">
+            <div class="label">session_id</div>
+            <h3>Run handle</h3>
+            <p>The resumable handle the orchestrator records for an agent attempt. It is what lets continuation relate to prior agent context.</p>
+          </div>
+          <div class="panel bg-blue">
+            <div class="label">thread_id</div>
+            <h3>Codex conversation</h3>
+            <p>The app-server thread that owns messages and dynamic tool availability. Tools are advertised on start and resume.</p>
+          </div>
+          <div class="panel bg-green">
+            <div class="label">turn_id</div>
+            <h3>Specific attempt</h3>
+            <p>The concrete unit that completed, failed, timed out, or emitted usage/rate-limit telemetry.</p>
+          </div>
+        </div>
+        <div class="diagram">
+          <svg viewBox="0 0 960 260" role="img" aria-label="Session thread turn relationship">
+            <defs>
+              <marker id="arrow11" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7177"></path>
+              </marker>
+            </defs>
+            <rect class="node violet" x="70" y="86" width="170" height="88"></rect>
+            <text class="txt" x="155" y="120" text-anchor="middle">session</text>
+            <text class="subtxt" x="155" y="142" text-anchor="middle">resume handle</text>
+            <rect class="node blue" x="330" y="66" width="210" height="128"></rect>
+            <text class="txt" x="435" y="110" text-anchor="middle">thread</text>
+            <text class="subtxt" x="435" y="132" text-anchor="middle">messages + tools</text>
+            <text class="subtxt" x="435" y="154" text-anchor="middle">linear_graphql advertised</text>
+            <rect class="node green" x="650" y="44" width="110" height="64"></rect>
+            <text class="txt" x="705" y="81" text-anchor="middle">turn 1</text>
+            <rect class="node yellow" x="650" y="126" width="110" height="64"></rect>
+            <text class="txt" x="705" y="163" text-anchor="middle">turn 2</text>
+            <rect class="node red" x="810" y="86" width="110" height="64"></rect>
+            <text class="txt" x="865" y="123" text-anchor="middle">status</text>
+            <path class="edge" marker-end="url(#arrow11)" d="M 240 130 H 330"></path>
+            <path class="edge" marker-end="url(#arrow11)" d="M 540 110 C 585 70, 610 76, 650 76"></path>
+            <path class="edge dashed" marker-end="url(#arrow11)" d="M 540 150 C 585 190, 610 158, 650 158"></path>
+            <path class="edge green" marker-end="url(#arrow11)" d="M 760 76 C 800 76, 808 100, 810 118"></path>
+            <path class="edge yellow" marker-end="url(#arrow11)" d="M 760 158 C 800 158, 808 134, 810 118"></path>
+          </svg>
+        </div>
+        <div class="callout">
+          <p><strong>Why it matters:</strong> if a canary says it succeeded, the proof file can name the exact Codex session/thread/turn that succeeded, not just "some process exited zero."</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Status">
+      <div>
+        <div class="kicker">Status snapshots</div>
+        <h2>The harness can leave a machine-readable proof file.</h2>
+        <p class="lede">When <code>--status-file</code> is set, the orchestrator writes an atomic JSON snapshot with the runtime state and recent run evidence.</p>
+      </div>
+      <div class="content">
+        <div class="grid.sidebar">
+          <div class="panel dark">
+            <pre>{
+  "agent_runner": "codex",
+  "linear_access": "host_proxy",
+  "running": [],
+  "retrying": [],
+  "needs_human": [],
+  "recent_runs": [{
+    "identifier": "SAM-54",
+    "session_id": "...",
+    "thread_id": "...",
+    "turn_id": "...",
+    "token_info": {
+      "input_tokens": 845304,
+      "output_tokens": 6276
+    },
+    "status": "succeeded"
+  }],
+  "codex_rate_limits": {
+    "plan_type": "prolite"
+  }
+}</pre>
+          </div>
+          <div class="panel">
+            <div class="label">What the fields mean</div>
+            <div class="status-list">
+              <div class="status-row"><span class="tag">agent_runner</span><p>Which runner mode produced the snapshot: <code>codex</code> or <code>claudecode</code>.</p></div>
+              <div class="status-row"><span class="tag">linear_access</span><p>Credential mode: <code>vm_env</code> or <code>host_proxy</code>.</p></div>
+              <div class="status-row"><span class="tag">recent_runs</span><p>Per-run proof: issue, status, timestamps, session/thread/turn IDs, tokens, and rate limits.</p></div>
+              <div class="status-row"><span class="tag">needs_human</span><p>Issues stopped by the unproductive-success guard.</p></div>
+              <div class="status-row"><span class="tag">workflow_*</span><p>Path and modification time of the workflow contract used.</p></div>
+            </div>
+          </div>
+        </div>
+        <div class="callout">
+          <p>Canary example: <code>/tmp/spur-orchestrator/SAM-54-codex.json</code>. Daemon example: <code>/tmp/spur-orchestrator/status.json</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Operator Scripts">
+      <div>
+        <div class="kicker">Operator scripts</div>
+        <h2>Operator scripts are the safe handles for running and proving the harness.</h2>
+        <p class="lede">They are not app code. They are repo-owned commands for the person operating the agent service.</p>
+      </div>
+      <div class="content">
+        <div class="grid.three">
+          <div class="panel bg-blue">
+            <h3><code>spur-codex-canary</code></h3>
+            <p>One wrapper for doctor, smoke, discover, preflight, run, verify, and checklist. It sources harness env, uses defaults, and writes predictable status files.</p>
+          </div>
+          <div class="panel bg-green">
+            <h3><code>spur-snapshot-codex.sh</code></h3>
+            <p>Copies a filtered <code>~/.codex</code> identity snapshot into <code>~/.spur/codex-harness</code> so the VM can run Codex without copying unrelated local state.</p>
+          </div>
+          <div class="panel bg-yellow">
+            <h3><code>spur-store-harness-secret</code></h3>
+            <p>Stores Linear and GitHub harness secrets through safer prompts and env-file fallback, avoiding shell history leaks.</p>
+          </div>
+        </div>
+        <div class="panel dark">
+          <pre>scripts/spur-codex-canary doctor
+scripts/spur-codex-canary smoke
+scripts/spur-codex-canary discover
+scripts/spur-codex-canary preflight SAM-54
+scripts/spur-codex-canary run SAM-54
+scripts/spur-codex-canary verify SAM-54
+scripts/spur-codex-canary checklist SAM-54</pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Canary">
+      <div>
+        <div class="kicker">Canary flow</div>
+        <h2>A canary is a controlled proof run before trusting the path unattended.</h2>
+        <p class="lede">It intentionally exercises the same machinery as production, but with one known issue and a machine-readable proof artifact.</p>
+      </div>
+      <div class="content">
+        <div class="timeline">
+          <div class="step"><div class="num">doctor</div><h3>local readiness</h3><p>Keys, SSH, Codex snapshot, wrapper prerequisites.</p></div>
+          <div class="step"><div class="num">smoke</div><h3>Codex local</h3><p>Start app-server and verify initialize/thread start.</p></div>
+          <div class="step"><div class="num">discover</div><h3>Linear candidates</h3><p>List eligible and rejected active issues.</p></div>
+          <div class="step"><div class="num">preflight</div><h3>target issue</h3><p>Check eligibility, credentials, and Codex handshake.</p></div>
+          <div class="step"><div class="num">run</div><h3>real VM turn</h3><p>Boot VM, run hooks, launch Codex, collect status.</p></div>
+          <div class="step"><div class="num">verify</div><h3>status proof</h3><p>Validate JSON says <code>codex</code>, <code>host_proxy</code>, succeeded.</p></div>
+          <div class="step"><div class="num">checklist</div><h3>human audit</h3><p>Inspect Linear comments, PR, CI, logs, telemetry.</p></div>
+          <div class="step"><div class="num">decide</div><h3>production</h3><p>Switch defaults or run another canary.</p></div>
+        </div>
+        <div class="callout">
+          <p><strong>SAM-54 result:</strong> the canary completed in a Tart VM, opened PR #102, reached Linear <code>In Review</code>, emitted Codex session/thread/turn telemetry, and was later merged and marked Done.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="End to End">
+      <div>
+        <div class="kicker">End-to-end run</div>
+        <h2>From Linear issue to merged code, the system crosses seven boundaries.</h2>
+      </div>
+      <div class="content top">
+        <div class="grid.two">
+          <div class="panel">
+            <div class="label">Forward path</div>
+            <ol class="bullets">
+              <li>Human writes/triages a Linear issue and marks it <code>Ready</code> + <code>AFK</code>.</li>
+              <li>Orchestrator polls Linear and filters candidates.</li>
+              <li>Worker claims the issue and ensures a Tart VM exists.</li>
+              <li>Hooks clone/update the repo and stage credentials according to mode.</li>
+              <li>Codex receives the rendered <code>WORKFLOW.md</code> prompt and performs the task.</li>
+              <li>Agent pushes branch, opens PR, posts closeout, moves Linear to <code>In Review</code>.</li>
+              <li>Orchestrator records status, tokens, rate limits, session IDs, and artifacts.</li>
+            </ol>
+          </div>
+          <div class="panel">
+            <div class="label">Feedback path</div>
+            <ol class="bullets">
+              <li>Each tick refreshes tracker state for running issues.</li>
+              <li>If the issue becomes terminal, cleanup runs and VM is deleted.</li>
+              <li>If the issue leaves active states, worker is canceled and claim is released.</li>
+              <li>If successful turns leave the issue active repeatedly, it escalates to <code>Needs Human</code>.</li>
+              <li>If the operator changes <code>WORKFLOW.md</code>, future runs reload safe policy changes.</li>
+              <li>If a canary is running, the proof file can be verified without live credentials.</li>
+              <li>If GitHub CI fails, the PR/checks become the next debugging surface.</li>
+            </ol>
+          </div>
+        </div>
+        <div class="diagram">
+          <svg viewBox="0 0 980 190" role="img" aria-label="End-to-end path">
+            <defs>
+              <marker id="arrow10" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c7177"></path>
+              </marker>
+            </defs>
+            <rect class="node blue" x="35" y="60" width="105" height="64"></rect>
+            <text class="txt" x="87" y="97" text-anchor="middle">Linear</text>
+            <rect class="node green" x="185" y="60" width="130" height="64"></rect>
+            <text class="txt" x="250" y="97" text-anchor="middle">orchestrator</text>
+            <rect class="node yellow" x="360" y="60" width="105" height="64"></rect>
+            <text class="txt" x="412" y="97" text-anchor="middle">Tart VM</text>
+            <rect class="node violet" x="510" y="60" width="105" height="64"></rect>
+            <text class="txt" x="562" y="97" text-anchor="middle">Codex</text>
+            <rect class="node" x="660" y="60" width="105" height="64"></rect>
+            <text class="txt" x="712" y="97" text-anchor="middle">GitHub</text>
+            <rect class="node teal" x="810" y="60" width="130" height="64"></rect>
+            <text class="txt" x="875" y="88" text-anchor="middle">status</text>
+            <text class="subtxt" x="875" y="108" text-anchor="middle">logs + JSON</text>
+            <path class="edge" marker-end="url(#arrow10)" d="M 140 92 H 185"></path>
+            <path class="edge" marker-end="url(#arrow10)" d="M 315 92 H 360"></path>
+            <path class="edge" marker-end="url(#arrow10)" d="M 465 92 H 510"></path>
+            <path class="edge" marker-end="url(#arrow10)" d="M 615 92 H 660"></path>
+            <path class="edge" marker-end="url(#arrow10)" d="M 765 92 H 810"></path>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="SAM-54">
+      <div>
+        <div class="kicker">Concrete proof</div>
+        <h2>SAM-54 proved the Codex path with a real issue, VM, PR, and status artifact.</h2>
+      </div>
+      <div class="content">
+        <div class="grid.three">
+          <div class="metric"><div class="value">SAM-54</div><div class="caption">Linear canary issue</div></div>
+          <div class="metric"><div class="value">PR #102</div><div class="caption">Codex-created canary PR</div></div>
+          <div class="metric"><div class="value">PR #103</div><div class="caption">Main implementation PR</div></div>
+        </div>
+        <div class="grid.two">
+          <div class="panel">
+            <div class="label">Canary evidence</div>
+            <ul class="bullets">
+              <li>Ran in a Tart-backed per-issue VM.</li>
+              <li>Forced <code>agent.runner=codex</code> and <code>linear_access=host_proxy</code>.</li>
+              <li>Emitted Codex <code>session_id</code>, <code>thread_id</code>, and <code>turn_id</code>.</li>
+              <li>Opened a GitHub PR and posted Linear pickup/closeout comments.</li>
+              <li>Produced <code>/tmp/spur-orchestrator/SAM-54-codex.json</code>.</li>
+              <li>Was merged and the issue was marked Done.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <div class="label">Implementation evidence</div>
+            <ul class="bullets">
+              <li>PR #103 merged the Codex runner, host proxy, reload, status, loop guard, scripts, docs, and tests.</li>
+              <li><code>SAM-52</code> was closed by prompt bookkeeping hardening.</li>
+              <li><code>SAM-53</code> was closed by stuck-loop escalation.</li>
+              <li>Final verification passed normal tests, focused race tests, and the canary verifier.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Failure Modes">
+      <div>
+        <div class="kicker">Failure handling</div>
+        <h2>The harness is designed to fail into visible states.</h2>
+        <p class="lede">A robust unattended runner is less about never failing and more about making failures bounded, inspectable, and recoverable.</p>
+      </div>
+      <div class="content">
+        <div class="grid.three">
+          <div class="panel bg-yellow">
+            <h3>VM or hook failure</h3>
+            <p>Worker records an error, the run can retry according to backoff, and logs/artifacts identify which hook failed.</p>
+          </div>
+          <div class="panel bg-red">
+            <h3>Agent timeout or stall</h3>
+            <p>Runner returns a timeout/stall error, worker integrates the failure, and the orchestrator decides retry or stop by configured limits.</p>
+          </div>
+          <div class="panel bg-blue">
+            <h3>Issue changed underneath</h3>
+            <p>Reconciliation notices terminal or inactive state and cancels active workers rather than continuing stale work.</p>
+          </div>
+          <div class="panel bg-violet">
+            <h3>Unsupported Codex request</h3>
+            <p>The app-server client explicitly rejects unsupported requests so the turn does not hang silently.</p>
+          </div>
+          <div class="panel bg-green">
+            <h3>Unproductive success</h3>
+            <p>Repeated clean exits with active Linear state move to <code>Needs Human</code> and stop burning turns.</p>
+          </div>
+          <div class="panel bg-teal">
+            <h3>Missing status proof</h3>
+            <p>In one-shot mode, requested <code>--status-file</code> write failure fails the run instead of becoming a hidden warning.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Production Posture">
+      <div>
+        <div class="kicker">Production posture</div>
+        <h2>Codex is proven; the default switch is a policy choice.</h2>
+        <p class="lede">The merged code still keeps Claude as the literal default in <code>WORKFLOW.md</code>, but the canary proved the Codex runner and host-proxy path. If Codex is the only production runner, flip these defaults.</p>
+      </div>
+      <div class="content">
+        <div class="grid.two">
+          <div class="panel dark">
+            <div class="label">Current merged default</div>
+            <pre>agent:
+  runner: claudecode
+
+credentials:
+  linear_access: vm_env</pre>
+          </div>
+          <div class="panel dark">
+            <div class="label">Codex-only production default</div>
+            <pre>agent:
+  runner: codex
+
+credentials:
+  linear_access: host_proxy</pre>
+          </div>
+        </div>
+        <div class="grid.three">
+          <div class="panel"><h3>What changes</h3><p>Daemon dispatch starts Codex by default and keeps Linear on the host.</p></div>
+          <div class="panel"><h3>What stays</h3><p>Linear policy, Tart VMs, hooks, GitHub PR flow, status snapshots, and handoff prompt remain the same.</p></div>
+          <div class="panel"><h3>What to keep briefly</h3><p>The Claude runner can remain as a fallback implementation until you are comfortable deleting legacy code.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Glossary">
+      <div>
+        <div class="kicker">Glossary</div>
+        <h2>Terms used by the harness</h2>
+      </div>
+      <div class="content top">
+        <div class="grid.two">
+          <div class="panel">
+            <table>
+              <tr><th>Term</th><th>Meaning</th></tr>
+              <tr><td>runner mode</td><td>Which agent backend is active: <code>codex</code> or <code>claudecode</code>.</td></tr>
+              <tr><td>credential mode</td><td>How Linear access reaches the agent: <code>vm_env</code> or <code>host_proxy</code>.</td></tr>
+              <tr><td>workspace</td><td>The isolated per-issue Tart VM.</td></tr>
+              <tr><td>claim</td><td>The orchestrator's in-memory ownership of an issue while a worker is running.</td></tr>
+              <tr><td>turn</td><td>One agent attempt or continuation segment.</td></tr>
+            </table>
+          </div>
+          <div class="panel">
+            <table>
+              <tr><th>Term</th><th>Meaning</th></tr>
+              <tr><td>canary</td><td>A controlled real issue run that proves a path before production use.</td></tr>
+              <tr><td>dynamic tool</td><td>A host-side tool advertised to Codex app-server.</td></tr>
+              <tr><td>terminal state</td><td>Linear states such as <code>Done</code>, <code>Canceled</code>, or <code>Duplicate</code>.</td></tr>
+              <tr><td>Needs Human</td><td>Escalation state when automation is no longer making productive progress.</td></tr>
+              <tr><td>status snapshot</td><td>JSON proof file with runtime state and recent run telemetry.</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-title="Recap">
+      <div>
+        <div class="kicker">Recap</div>
+        <h2>The important mental model</h2>
+      </div>
+      <div class="content centered">
+        <div class="grid.three" style="width:100%;">
+          <div class="panel bg-blue">
+            <h3>Linear decides what is eligible</h3>
+            <p>Ready/In Progress, AFK, no HITL, blockers Done, Spur project.</p>
+          </div>
+          <div class="panel bg-green">
+            <h3>The orchestrator decides how it runs</h3>
+            <p>Claims, VM lifecycle, hooks, runner selection, retries, cancellation, reload, status.</p>
+          </div>
+          <div class="panel bg-violet">
+            <h3>Codex decides how to solve the issue</h3>
+            <p>Implements, verifies, opens PR, comments on Linear, and moves issue state according to the workflow prompt.</p>
+          </div>
+        </div>
+        <p class="lede">That separation is the system. It lets the repo own policy, the orchestrator own safety, and the agent own implementation.</p>
+      </div>
+      <div class="footer-note"><span>Deck file: <code>explainers/symphony-harness.html</code></span><span>Last updated from merged PR #103 state.</span></div>
+    </section>
+
+  </main>
+
+  <nav class="controls" aria-label="Slideshow controls">
+    <div class="nav">
+      <button id="prev" title="Previous slide" aria-label="Previous slide">&lt;</button>
+      <button id="next" title="Next slide" aria-label="Next slide">&gt;</button>
+    </div>
+    <div class="current-title" id="currentTitle">Title</div>
+    <div class="progress" aria-hidden="true"><div class="bar" id="bar"></div></div>
+    <div class="counter" id="counter">1 / 1</div>
+  </nav>
+</div>
+
+<script>
+(() => {
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const prev = document.getElementById('prev');
+  const next = document.getElementById('next');
+  const counter = document.getElementById('counter');
+  const currentTitle = document.getElementById('currentTitle');
+  const bar = document.getElementById('bar');
+  let index = 0;
+
+  function fromHash() {
+    const raw = window.location.hash.replace('#', '');
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isNaN(n) && n >= 1 && n <= slides.length) index = n - 1;
+  }
+
+  function update(pushHash = true) {
+    slides.forEach((slide, i) => {
+      slide.classList.toggle('active', i === index);
+      slide.classList.toggle('past', i < index);
+    });
+    counter.textContent = `${index + 1} / ${slides.length}`;
+    currentTitle.textContent = slides[index].dataset.title || 'Slide';
+    bar.style.width = `${((index + 1) / slides.length) * 100}%`;
+    document.title = `${index + 1}/${slides.length} - ${slides[index].dataset.title || 'Spur Symphony Harness'}`;
+    if (pushHash) history.replaceState(null, '', `#${index + 1}`);
+  }
+
+  function go(delta) {
+    index = Math.min(slides.length - 1, Math.max(0, index + delta));
+    update();
+  }
+
+  prev.addEventListener('click', () => go(-1));
+  next.addEventListener('click', () => go(1));
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowRight' || event.key === ' ' || event.key === 'PageDown') {
+      event.preventDefault();
+      go(1);
+    }
+    if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+      event.preventDefault();
+      go(-1);
+    }
+    if (event.key === 'Home') {
+      index = 0;
+      update();
+    }
+    if (event.key === 'End') {
+      index = slides.length - 1;
+      update();
+    }
+  });
+  window.addEventListener('hashchange', () => {
+    fromHash();
+    update(false);
+  });
+
+  fromHash();
+  update(false);
+})();
+</script>
+</body>
+</html>
