@@ -44,6 +44,17 @@ func TestEligibilityFilter_SpurDefault(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "AFK with mixed-case resolved blocker state",
+			issue: domain.Issue{
+				Identifier: "SAM-4",
+				Labels:     []string{"afk"},
+				BlockedBy: []domain.Blocker{
+					{Identifier: "SAM-1", State: "dOnE"},
+				},
+			},
+			want: true,
+		},
+		{
 			name: "AFK with open blocker",
 			issue: domain.Issue{
 				Identifier: "SAM-5",

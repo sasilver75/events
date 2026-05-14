@@ -117,6 +117,9 @@ agent:
   # Capped at 2 by Apple's macOS-guest license. Raising past 2 will be
   # silently ignored by the host (the 3rd boot will fail).
   max_concurrent_agents: 2
+  max_concurrent_agents_by_state:
+    Ready: 2
+    In Progress: 1
   max_turns: 20
   max_retry_backoff_ms: 300000
   # If successful agent turns keep leaving the issue active, stop dispatching

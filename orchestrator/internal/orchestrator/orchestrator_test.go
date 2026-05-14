@@ -466,6 +466,62 @@ func TestTick_RespectsMaxConcurrentAgents(t *testing.T) {
 	}
 }
 
+func TestDispatchRespectsPerStateCap(t *testing.T) {
+	t.Parallel()
+	issues := []domain.Issue{
+		{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}},
+		{ID: "uuid-2", Identifier: "SAM-2", State: "READY", Labels: []string{"afk"}},
+		{ID: "uuid-3", Identifier: "SAM-3", State: "In Progress", Labels: []string{"afk"}},
+	}
+	worker := &recordingWorker{waitForCancel: true}
+	cfg := validConfig()
+	cfg.Agent.MaxConcurrentAgents = 3
+	cfg.Agent.MaxConcurrentAgentsByState = map[string]int{"ready": 1}
+	o := New(nil, cfg, &fakeTracker{}, worker, silentLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	o.dispatchUpToCapacity(ctx, issues)
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.state.Running) != 2 {
+		t.Fatalf("running = %d, want 2", len(o.state.Running))
+	}
+	if _, running := o.state.Running["uuid-1"]; !running {
+		t.Fatal("SAM-1 should be running")
+	}
+	if _, running := o.state.Running["uuid-2"]; running {
+		t.Fatal("SAM-2 should be skipped by normalized ready cap")
+	}
+	if _, running := o.state.Running["uuid-3"]; !running {
+		t.Fatal("SAM-3 should still dispatch because in progress has no state cap")
+	}
+}
+
+func TestDispatchWithoutPerStateCapsFallsBackToGlobalLimit(t *testing.T) {
+	t.Parallel()
+	issues := []domain.Issue{
+		{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}},
+		{ID: "uuid-2", Identifier: "SAM-2", State: "READY", Labels: []string{"afk"}},
+	}
+	worker := &recordingWorker{waitForCancel: true}
+	cfg := validConfig()
+	cfg.Agent.MaxConcurrentAgents = 2
+	cfg.Agent.MaxConcurrentAgentsByState = nil
+	o := New(nil, cfg, &fakeTracker{}, worker, silentLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	o.dispatchUpToCapacity(ctx, issues)
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.state.Running) != 2 {
+		t.Fatalf("running = %d, want 2", len(o.state.Running))
+	}
+}
+
 func TestHandleWorkerResult_StopsAtMaxTurns(t *testing.T) {
 	t.Parallel()
 	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1"}
@@ -654,7 +710,7 @@ func TestReconcile_CancelsTerminalRunAndCleansWorkspace(t *testing.T) {
 	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
 	tracker := &fakeTracker{
 		candidates: []domain.Issue{issue},
-		states:     map[string]string{issue.ID: "Done"},
+		states:     map[string]string{issue.ID: "dOnE"},
 	}
 	worker := &recordingWorker{waitForCancel: true}
 	o := New(nil, validConfig(), tracker, worker, silentLogger())
@@ -677,6 +733,39 @@ func TestReconcile_CancelsTerminalRunAndCleansWorkspace(t *testing.T) {
 	worker.mu.Lock()
 	defer worker.mu.Unlock()
 	t.Fatalf("canceled=%v cleanupCalls=%v, want canceled=true cleanupCalls=1", worker.canceled, worker.cleanupCalls)
+}
+
+func TestReconcile_TreatsMixedCaseActiveStateAsActive(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
+	tracker := &fakeTracker{
+		candidates: []domain.Issue{issue},
+		states:     map[string]string{issue.ID: "rEaDy"},
+	}
+	worker := &recordingWorker{waitForCancel: true}
+	o := New(nil, validConfig(), tracker, worker, silentLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	o.dispatchUpToCapacity(ctx, []domain.Issue{issue})
+	o.reconcile(context.Background())
+	time.Sleep(20 * time.Millisecond)
+
+	o.mu.Lock()
+	_, running := o.state.Running[issue.ID]
+	_, cleanup := o.cleanupAfterRun[issue.ID]
+	o.mu.Unlock()
+	if !running {
+		t.Fatal("mixed-case active state canceled the run")
+	}
+	if cleanup {
+		t.Fatal("mixed-case active state scheduled cleanup")
+	}
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	if worker.canceled {
+		t.Fatal("worker was canceled for mixed-case active state")
+	}
 }
 
 func TestReconcile_CancelsStalledRunAndSchedulesRetry(t *testing.T) {
