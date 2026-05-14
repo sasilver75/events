@@ -117,14 +117,19 @@ type recordingWorker struct {
 	waitForCancel  bool
 	result         WorkerResult
 	delay          time.Duration
+	eventToEmit    *agent.Event
 }
 
-func (w *recordingWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, resumeSessionID string) WorkerResult {
+func (w *recordingWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, resumeSessionID string, onEvent func(agent.Event)) WorkerResult {
 	w.mu.Lock()
 	w.calls = append(w.calls, issue.Identifier)
 	w.attempts = append(w.attempts, attempt)
 	w.resumes = append(w.resumes, resumeSessionID)
+	eventToEmit := w.eventToEmit
 	w.mu.Unlock()
+	if eventToEmit != nil && onEvent != nil {
+		onEvent(*eventToEmit)
+	}
 	if w.waitForCancel {
 		<-ctx.Done()
 		w.mu.Lock()
@@ -645,6 +650,55 @@ func TestReconcile_CancelsTerminalRunAndCleansWorkspace(t *testing.T) {
 	t.Fatalf("canceled=%v cleanupCalls=%v, want canceled=true cleanupCalls=1", worker.canceled, worker.cleanupCalls)
 }
 
+func TestReconcile_CancelsStalledRunAndSchedulesRetry(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
+	tracker := &fakeTracker{
+		candidates: []domain.Issue{issue},
+		states:     map[string]string{issue.ID: "Ready"},
+	}
+	worker := &recordingWorker{waitForCancel: true}
+	cfg := validConfig()
+	cfg.Codex.StallTimeoutMs = 10
+	o := New(nil, cfg, tracker, worker, silentLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	o.dispatchUpToCapacity(ctx, []domain.Issue{issue})
+	o.mu.Lock()
+	entry := o.state.Running[issue.ID]
+	entry.Session.LastEvent = string(agent.EventOtherMessage)
+	entry.Session.LastTimestamp = time.Now().Add(-time.Second)
+	o.state.Running[issue.ID] = entry
+	o.mu.Unlock()
+
+	o.reconcile(context.Background())
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		o.drainWorkerResults()
+		o.mu.Lock()
+		retry, retrying := o.state.RetryAttempts[issue.ID]
+		recentRuns := append([]domain.RunAttempt(nil), o.state.RecentRuns...)
+		o.mu.Unlock()
+		if retrying && len(recentRuns) == 1 {
+			defer o.retryTimers[issue.ID].Stop()
+			if retry.Attempt != 1 {
+				t.Fatalf("retry attempt = %d, want 1", retry.Attempt)
+			}
+			if !strings.Contains(retry.Error, "no agent events for") {
+				t.Fatalf("retry error = %q, want stall reason", retry.Error)
+			}
+			if recentRuns[0].Status != domain.RunStatusStalled {
+				t.Fatalf("recent status = %q, want stalled", recentRuns[0].Status)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("stalled run did not schedule retry")
+}
+
 func TestCleanupTerminalWorkspaces(t *testing.T) {
 	t.Parallel()
 	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1"}
@@ -885,6 +939,7 @@ func validConfig() workflow.ServiceConfig {
 		Tracker: workflow.TrackerConfig{
 			Kind:           "linear",
 			Endpoint:       "https://api.linear.app/graphql",
+			APIKeyLiteral:  "lin_test",
 			ProjectSlug:    "spur",
 			ActiveStates:   []string{"Ready", "In Progress"},
 			TerminalStates: []string{"Done", "Canceled", "Duplicate"},
@@ -927,6 +982,7 @@ func writeWorkflowForReloadTestAtPathWithRunner(t *testing.T, path string, runne
 	data := []byte(`---
 tracker:
   kind: linear
+  api_key: lin_test
   project_slug: spur
 polling:
   interval_ms: ` + strconv.Itoa(pollIntervalMs) + `

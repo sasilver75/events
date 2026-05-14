@@ -141,7 +141,7 @@ func main() {
 	}
 
 	// 2. Resolve credentials from env.
-	linearAPIKey, err := requireEnv(cfg.Tracker.APIKeyEnv, "LINEAR_API_KEY")
+	linearAPIKey, err := cfg.ResolveTrackerAPIKey()
 	if err != nil {
 		fatal(logger, "missing Linear API key", "err", err)
 	}
@@ -273,7 +273,7 @@ func validatePreflightCredentials(githubToken string) error {
 
 func validatePreflightLocalReadiness(cfg workflow.ServiceConfig, requireRunCredentials bool) error {
 	var problems []string
-	if _, err := requireEnv(cfg.Tracker.APIKeyEnv, "LINEAR_API_KEY"); err != nil {
+	if _, err := cfg.ResolveTrackerAPIKey(); err != nil {
 		problems = append(problems, err.Error())
 	}
 	if requireRunCredentials {

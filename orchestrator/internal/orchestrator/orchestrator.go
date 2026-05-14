@@ -41,7 +41,7 @@ type NeedsHumanEscalator interface {
 // the issue to the worker, gets a result back, and decides what to do
 // next based on the result.
 type Worker interface {
-	Run(ctx context.Context, issue domain.Issue, attempt *int, resumeSessionID string) WorkerResult
+	Run(ctx context.Context, issue domain.Issue, attempt *int, resumeSessionID string, onEvent func(agent.Event)) WorkerResult
 }
 
 // CleanupWorker is implemented by concrete workers that know how to remove
@@ -103,6 +103,7 @@ type Orchestrator struct {
 
 	cancelRunning   map[string]context.CancelFunc
 	cleanupAfterRun map[string]struct{}
+	stalledRunning  map[string]string
 	readyAttempts   map[string]int
 	readySessions   map[string]string
 
@@ -136,6 +137,7 @@ func New(def *workflow.Definition, cfg workflow.ServiceConfig, t Tracker, w Work
 		workerDone:      make(chan WorkerResult, 16),
 		cancelRunning:   map[string]context.CancelFunc{},
 		cleanupAfterRun: map[string]struct{}{},
+		stalledRunning:  map[string]string{},
 		readyAttempts:   map[string]int{},
 		readySessions:   map[string]string{},
 	}
@@ -250,7 +252,7 @@ func (o *Orchestrator) RunOnce(ctx context.Context, issueIdentifier string) erro
 
 	o.Logger.Info("dispatching one-shot", "issue", target.Identifier)
 	startedAt := time.Now()
-	result := o.Worker.Run(ctx, *target, nil, "")
+	result := o.Worker.Run(ctx, *target, nil, "", nil)
 	o.recordOneShotResult(result, startedAt)
 	if err := o.writeStatusSnapshot(ctx); err != nil {
 		return errors.New("status snapshot: " + err.Error())
@@ -397,6 +399,13 @@ func (o *Orchestrator) handleWorkerResult(res WorkerResult) {
 	delete(o.cancelRunning, res.Issue.ID)
 	_, cleanup := o.cleanupAfterRun[res.Issue.ID]
 	delete(o.cleanupAfterRun, res.Issue.ID)
+	if stallErr, stalled := o.stalledRunning[res.Issue.ID]; stalled {
+		res.Status = domain.RunStatusStalled
+		if res.Error == "" {
+			res.Error = stallErr
+		}
+		delete(o.stalledRunning, res.Issue.ID)
+	}
 	finishedAt := time.Now().UTC()
 	o.recordRunTelemetryLocked(res, runningEntry, hadRunningEntry)
 	o.recordRunAttemptLocked(res, runningEntry.StartedAt, finishedAt)
@@ -636,7 +645,7 @@ func (o *Orchestrator) onRetryFire(issue domain.Issue, attempt int) {
 
 // reconcile is spec §8.5 (active run reconciliation).
 //
-// Part A: stall detection (TODO when we add per-event timestamps to RunningEntry)
+// Part A: stall detection based on the latest observed agent event activity.
 // Part B: refresh tracker state for all running issues. If a state becomes
 //
 //	terminal, signal the worker to stop and clean up.
@@ -647,7 +656,31 @@ func (o *Orchestrator) reconcile(ctx context.Context) {
 		return
 	}
 	ids := make([]string, 0, len(o.state.Running))
-	for id := range o.state.Running {
+	now := time.Now().UTC()
+	stallTimeout := time.Duration(o.Config.AgentStallTimeoutMs()) * time.Millisecond
+	for id, entry := range o.state.Running {
+		if stallTimeout > 0 {
+			lastActivity := entry.Session.LastTimestamp
+			if lastActivity.IsZero() {
+				lastActivity = entry.StartedAt
+			}
+			if !lastActivity.IsZero() && now.Sub(lastActivity) >= stallTimeout {
+				if _, alreadyStalling := o.stalledRunning[id]; !alreadyStalling {
+					reason := "no agent events for " + stallTimeout.String()
+					o.stalledRunning[id] = reason
+					o.Logger.Warn("running issue stalled; canceling worker",
+						"issue", entry.Issue.Identifier,
+						"issue_id", id,
+						"last_event", entry.Session.LastEvent,
+						"last_event_at", lastActivity,
+						"stall_timeout", stallTimeout,
+					)
+					if cancel, ok := o.cancelRunning[id]; ok {
+						cancel()
+					}
+				}
+			}
+		}
 		ids = append(ids, id)
 	}
 	o.mu.Unlock()
@@ -708,10 +741,12 @@ func (o *Orchestrator) dispatchUpToCapacity(ctx context.Context, sorted []domain
 
 		// Claim.
 		runCtx, cancel := context.WithCancel(ctx)
+		now := time.Now().UTC()
 		o.state.Claimed[issue.ID] = struct{}{}
 		o.state.Running[issue.ID] = domain.RunningEntry{
 			Issue:     issue,
-			StartedAt: time.Now(),
+			Session:   domain.LiveSession{LastEvent: "run_started", LastTimestamp: now},
+			StartedAt: now,
 			Attempt:   attempt,
 		}
 		o.cancelRunning[issue.ID] = cancel
@@ -752,9 +787,49 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue domain.Issue, attemp
 			}
 		}
 	}()
-	res := o.Worker.Run(ctx, issue, attempt, resumeSessionID)
+	res := o.Worker.Run(ctx, issue, attempt, resumeSessionID, func(ev agent.Event) {
+		o.recordAgentEvent(issue.ID, ev)
+	})
 	res.Attempt = attempt
 	o.workerDone <- res
+}
+
+func (o *Orchestrator) recordAgentEvent(issueID string, ev agent.Event) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	entry, ok := o.state.Running[issueID]
+	if !ok {
+		return
+	}
+	timestamp := ev.Timestamp
+	if timestamp.IsZero() {
+		timestamp = time.Now().UTC()
+	}
+	entry.Session.LastEvent = string(ev.Type)
+	entry.Session.LastTimestamp = timestamp
+	entry.Session.LastMessage = ev.Error
+	if ev.SessionID != "" {
+		entry.Session.SessionID = ev.SessionID
+	}
+	if ev.ThreadID != "" {
+		entry.Session.ThreadID = ev.ThreadID
+	}
+	if ev.TurnID != "" {
+		entry.Session.TurnID = ev.TurnID
+	}
+	if ev.Usage.InputTokens > 0 {
+		entry.Session.InputTokens = ev.Usage.InputTokens
+	}
+	if ev.Usage.OutputTokens > 0 {
+		entry.Session.OutputTokens = ev.Usage.OutputTokens
+	}
+	if ev.Usage.TotalTokens > 0 {
+		entry.Session.TotalTokens = ev.Usage.TotalTokens
+	}
+	if ev.RateLimits != nil {
+		o.state.CodexRateLimits = ev.RateLimits
+	}
+	o.state.Running[issueID] = entry
 }
 
 func (o *Orchestrator) cleanupTerminalWorkspaces(ctx context.Context) {

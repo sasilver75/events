@@ -3,6 +3,8 @@ package workflow
 import (
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 )
 
 // ServiceConfig is the typed view of Definition.Config. Symphony spec §4.1.3
@@ -26,7 +28,8 @@ type ServiceConfig struct {
 type TrackerConfig struct {
 	Kind           string // currently "linear"
 	Endpoint       string
-	APIKeyEnv      string // env var name (we don't store the secret in this struct)
+	APIKeyEnv      string // env var name for "$VAR_NAME" references
+	APIKeyLiteral  string // literal api_key value when WORKFLOW.md uses one
 	ProjectSlug    string
 	ActiveStates   []string
 	TerminalStates []string
@@ -85,6 +88,7 @@ var (
 	ErrMissingTrackerKind      = errors.New("missing_tracker_kind")
 	ErrMissingProjectSlug      = errors.New("missing_tracker_project_slug")
 	ErrMissingCodexCommand     = errors.New("missing_codex_command")
+	ErrMissingTrackerAPIKey    = errors.New("missing_tracker_api_key")
 	ErrUnsupportedLinearAccess = errors.New("unsupported_linear_access_mode")
 )
 
@@ -122,7 +126,7 @@ func NewServiceConfig(raw map[string]any) ServiceConfig {
 		if v := stringField(t, "endpoint"); v != "" {
 			cfg.Tracker.Endpoint = v
 		}
-		cfg.Tracker.APIKeyEnv = parseEnvVarRef(stringField(t, "api_key"))
+		cfg.Tracker.APIKeyLiteral, cfg.Tracker.APIKeyEnv = parseAPIKeyRef(stringField(t, "api_key"))
 		cfg.Tracker.ProjectSlug = stringField(t, "project_slug")
 		if states := stringSliceField(t, "active_states"); states != nil {
 			cfg.Tracker.ActiveStates = states
@@ -222,7 +226,35 @@ func (c ServiceConfig) Validate() error {
 	default:
 		return fmt.Errorf("%w: %q", ErrUnsupportedRunner, c.Agent.Runner)
 	}
+	if _, err := c.ResolveTrackerAPIKey(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// ResolveTrackerAPIKey applies the same env-aware resolution rule used by the
+// CLI and validation. It supports Symphony's literal api_key form and "$VAR"
+// references, with LINEAR_API_KEY as Spur's historical fallback.
+func (c ServiceConfig) ResolveTrackerAPIKey() (string, error) {
+	if c.Tracker.APIKeyLiteral != "" {
+		return c.Tracker.APIKeyLiteral, nil
+	}
+	return resolveEnv(c.Tracker.APIKeyEnv, "LINEAR_API_KEY")
+}
+
+func resolveEnv(preferredVar, fallbackVar string) (string, error) {
+	if preferredVar != "" {
+		if v := os.Getenv(preferredVar); v != "" {
+			return v, nil
+		}
+	}
+	if v := os.Getenv(fallbackVar); v != "" {
+		return v, nil
+	}
+	if preferredVar == "" || preferredVar == fallbackVar {
+		return "", fmt.Errorf("%w: env var %s is not set", ErrMissingTrackerAPIKey, fallbackVar)
+	}
+	return "", fmt.Errorf("%w: env var %s (or %s) is not set", ErrMissingTrackerAPIKey, preferredVar, fallbackVar)
 }
 
 func (c ServiceConfig) AgentCommand() string {
@@ -294,14 +326,14 @@ func stringSliceField(m map[string]any, key string) []string {
 	return out
 }
 
-// parseEnvVarRef extracts the env var name from a "$VAR_NAME" reference.
-// Spec §5.3.1: api_key may be a literal token or "$VAR_NAME".
-// Returns "" for literal tokens (caller decides what to do).
-func parseEnvVarRef(s string) string {
+// parseAPIKeyRef splits the tracker api_key into its literal or env-reference
+// representation. Spec §5.3.1: api_key may be a literal token or "$VAR_NAME".
+func parseAPIKeyRef(s string) (literal, env string) {
+	s = strings.TrimSpace(s)
 	if len(s) >= 2 && s[0] == '$' {
-		return s[1:]
+		return "", s[1:]
 	}
-	return ""
+	return s, ""
 }
 
 func defaultWorkspaceRoot() string {

@@ -72,6 +72,9 @@ func TestNewServiceConfig_OverridesFromFrontMatter(t *testing.T) {
 	if cfg.Tracker.APIKeyEnv != "LINEAR_API_KEY" {
 		t.Errorf("Tracker.APIKeyEnv = %q, want LINEAR_API_KEY", cfg.Tracker.APIKeyEnv)
 	}
+	if cfg.Tracker.APIKeyLiteral != "" {
+		t.Errorf("Tracker.APIKeyLiteral = %q, want empty", cfg.Tracker.APIKeyLiteral)
+	}
 	if cfg.Tracker.ProjectSlug != "spur-c956b9432c2f" {
 		t.Errorf("Tracker.ProjectSlug = %q", cfg.Tracker.ProjectSlug)
 	}
@@ -101,6 +104,24 @@ func TestNewServiceConfig_OverridesFromFrontMatter(t *testing.T) {
 	}
 	if cfg.LinearAccessMode() != "vm_env" {
 		t.Errorf("LinearAccessMode = %q", cfg.LinearAccessMode())
+	}
+}
+
+func TestNewServiceConfig_ParsesLiteralTrackerAPIKey(t *testing.T) {
+	t.Parallel()
+	cfg := NewServiceConfig(map[string]any{
+		"tracker": map[string]any{
+			"kind":         "linear",
+			"api_key":      "lin_literal",
+			"project_slug": "spur",
+		},
+	})
+
+	if cfg.Tracker.APIKeyLiteral != "lin_literal" {
+		t.Fatalf("Tracker.APIKeyLiteral = %q, want lin_literal", cfg.Tracker.APIKeyLiteral)
+	}
+	if cfg.Tracker.APIKeyEnv != "" {
+		t.Fatalf("Tracker.APIKeyEnv = %q, want empty", cfg.Tracker.APIKeyEnv)
 	}
 }
 
@@ -136,7 +157,7 @@ func TestServiceConfig_Validate(t *testing.T) {
 		{
 			name: "valid",
 			cfg: ServiceConfig{
-				Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
+				Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur", APIKeyLiteral: "lin_test"},
 				Codex:   CodexConfig{Command: "codex app-server"},
 			},
 			want: nil,
@@ -144,7 +165,7 @@ func TestServiceConfig_Validate(t *testing.T) {
 		{
 			name: "valid codex",
 			cfg: ServiceConfig{
-				Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
+				Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur", APIKeyLiteral: "lin_test"},
 				Agent:   AgentConfig{Runner: "codex"},
 				Codex:   CodexConfig{Command: "codex app-server"},
 			},
@@ -161,7 +182,7 @@ func TestServiceConfig_Validate(t *testing.T) {
 		{
 			name: "vm env valid with codex",
 			cfg: ServiceConfig{
-				Tracker:     TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
+				Tracker:     TrackerConfig{Kind: "linear", ProjectSlug: "spur", APIKeyLiteral: "lin_test"},
 				Codex:       CodexConfig{Command: "codex app-server"},
 				Credentials: CredentialsConfig{LinearAccess: "vm_env"},
 			},
@@ -170,7 +191,7 @@ func TestServiceConfig_Validate(t *testing.T) {
 		{
 			name: "host proxy valid with codex",
 			cfg: ServiceConfig{
-				Tracker:     TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
+				Tracker:     TrackerConfig{Kind: "linear", ProjectSlug: "spur", APIKeyLiteral: "lin_test"},
 				Agent:       AgentConfig{Runner: "codex"},
 				Codex:       CodexConfig{Command: "codex app-server"},
 				Credentials: CredentialsConfig{LinearAccess: "host_proxy"},
@@ -198,10 +219,37 @@ func TestServiceConfig_Validate(t *testing.T) {
 	}
 }
 
+func TestServiceConfig_ValidateRequiresResolvedTrackerAPIKey(t *testing.T) {
+	t.Setenv("SPUR_TEST_LINEAR_KEY", "")
+	t.Setenv("LINEAR_API_KEY", "")
+	cfg := ServiceConfig{
+		Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur", APIKeyEnv: "SPUR_TEST_LINEAR_KEY"},
+		Codex:   CodexConfig{Command: "codex app-server"},
+	}
+
+	err := cfg.Validate()
+	if !errors.Is(err, ErrMissingTrackerAPIKey) {
+		t.Fatalf("Validate() = %v, want ErrMissingTrackerAPIKey", err)
+	}
+}
+
+func TestServiceConfig_ValidateUsesTrackerAPIKeyEnvFallback(t *testing.T) {
+	t.Setenv("SPUR_TEST_LINEAR_KEY", "")
+	t.Setenv("LINEAR_API_KEY", "lin_test")
+	cfg := ServiceConfig{
+		Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur", APIKeyEnv: "SPUR_TEST_LINEAR_KEY"},
+		Codex:   CodexConfig{Command: "codex app-server"},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
 // TestNewServiceConfig_RealWorkflowFile validates the repo's WORKFLOW.md
 // loads to a config that passes Validate.
 func TestNewServiceConfig_RealWorkflowFile(t *testing.T) {
-	t.Parallel()
+	t.Setenv("LINEAR_API_KEY", "lin_test")
 	def, err := Load("../../../WORKFLOW.md")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
