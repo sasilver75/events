@@ -113,7 +113,7 @@ func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, 
 	}
 
 	// 4. Render prompt.
-	prompt, err := workflow.Render(def.PromptTemplate, issue, attempt)
+	prompt, err := workflow.RenderAgentPrompt(def.PromptTemplate, issue, attempt, resumeSessionID)
 	if err != nil {
 		return WorkerResult{Issue: issue, Status: domain.RunStatusFailed, Error: "prompt_render: " + err.Error()}
 	}

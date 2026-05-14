@@ -627,24 +627,106 @@ func (o *Orchestrator) scheduleRetryLocked(issue domain.Issue, attempt int, errS
 	o.retryTimers[issue.ID] = entry.TimerHandle.(*time.Timer)
 }
 
-// onRetryFire runs when a retry timer fires. The orchestrator's next tick
-// will pick the issue up if it's still candidate-eligible.
+// onRetryFire runs when a retry timer fires. It actively re-fetches the issue
+// and re-dispatches immediately when the issue is still eligible and capacity
+// is available. If either condition is false, it releases the claim so the next
+// normal tick can pick up any later change without waiting on another timer.
 func (o *Orchestrator) onRetryFire(issue domain.Issue, attempt int) {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	if _, needsHuman := o.state.NeedsHuman[issue.ID]; needsHuman {
 		o.Logger.Info("retry timer fired for issue needing human review; keeping claim",
 			"issue", issue.Identifier, "attempt", attempt)
 		delete(o.state.RetryAttempts, issue.ID)
 		delete(o.retryTimers, issue.ID)
+		o.mu.Unlock()
 		return
 	}
 	delete(o.state.RetryAttempts, issue.ID)
 	delete(o.retryTimers, issue.ID)
-	delete(o.state.Claimed, issue.ID)
 	o.readyAttempts[issue.ID] = attempt
-	o.Logger.Info("retry timer fired; releasing claim for re-dispatch",
+	activeStates := append([]string(nil), o.Config.Tracker.ActiveStates...)
+	o.mu.Unlock()
+
+	candidates, err := o.Tracker.FetchCandidateIssues(context.Background(), activeStates)
+	if err != nil {
+		o.Logger.Warn("retry timer candidate fetch failed; releasing claim for next tick",
+			"issue", issue.Identifier, "attempt", attempt, "err", err)
+		o.releaseRetryClaim(issue.ID)
+		return
+	}
+	eligible, rejected := o.Eligibility.Apply(candidates)
+	for _, r := range rejected {
+		if r.Issue.ID == issue.ID || r.Issue.Identifier == issue.Identifier {
+			o.Logger.Info("retry timer found issue ineligible; releasing claim for next tick",
+				"issue", issue.Identifier, "attempt", attempt, "reason", r.Reason)
+			o.releaseRetryClaim(issue.ID)
+			return
+		}
+	}
+	for _, candidate := range eligible {
+		if candidate.ID != issue.ID && candidate.Identifier != issue.Identifier {
+			continue
+		}
+		if o.dispatchRetryIfCapacity(context.Background(), candidate, attempt) {
+			o.Logger.Info("retry timer re-dispatched issue",
+				"issue", candidate.Identifier, "attempt", attempt)
+			return
+		}
+		o.Logger.Info("retry timer found no capacity; releasing claim for next tick",
+			"issue", candidate.Identifier, "attempt", attempt)
+		o.releaseRetryClaim(issue.ID)
+		return
+	}
+
+	o.Logger.Info("retry timer did not find issue among active candidates; releasing claim for next tick",
 		"issue", issue.Identifier, "attempt", attempt)
+	o.releaseRetryClaim(issue.ID)
+}
+
+func (o *Orchestrator) releaseRetryClaim(issueID string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.state.Claimed, issueID)
+}
+
+func (o *Orchestrator) dispatchRetryIfCapacity(ctx context.Context, issue domain.Issue, attempt int) bool {
+	o.mu.Lock()
+	availableSlots := o.Config.Agent.MaxConcurrentAgents - len(o.state.Running)
+	if availableSlots <= 0 {
+		o.mu.Unlock()
+		return false
+	}
+	if !o.hasStateCapacityLocked(issue.State) {
+		o.mu.Unlock()
+		return false
+	}
+	if _, running := o.state.Running[issue.ID]; running {
+		o.mu.Unlock()
+		return true
+	}
+	if _, needsHuman := o.state.NeedsHuman[issue.ID]; needsHuman {
+		o.mu.Unlock()
+		return true
+	}
+
+	attemptCopy := attempt
+	resumeSessionID := o.readySessionForLocked(issue.ID)
+	delete(o.readyAttempts, issue.ID)
+
+	runCtx, cancel := context.WithCancel(ctx)
+	now := time.Now().UTC()
+	o.state.Claimed[issue.ID] = struct{}{}
+	o.state.Running[issue.ID] = domain.RunningEntry{
+		Issue:     issue,
+		Session:   domain.LiveSession{LastEvent: "run_started"},
+		StartedAt: now,
+		Attempt:   &attemptCopy,
+	}
+	o.cancelRunning[issue.ID] = cancel
+	o.mu.Unlock()
+
+	go o.runWorker(runCtx, issue, &attemptCopy, resumeSessionID)
+	return true
 }
 
 // reconcile is spec §8.5 (active run reconciliation).

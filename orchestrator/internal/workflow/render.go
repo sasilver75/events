@@ -33,6 +33,46 @@ func Render(template string, issue domain.Issue, attempt *int) (string, error) {
 	return out, nil
 }
 
+// RenderAgentPrompt returns the prompt that should be sent for a worker turn.
+// First turns use the full WORKFLOW.md prompt. Continuations on an existing
+// Codex session get a concise overlay that points the agent at the remaining
+// handoff work instead of replaying the whole task contract.
+func RenderAgentPrompt(template string, issue domain.Issue, attempt *int, resumeSessionID string) (string, error) {
+	if resumeSessionID == "" {
+		return Render(template, issue, attempt)
+	}
+	return RenderContinuationPrompt(issue, attempt, resumeSessionID), nil
+}
+
+func RenderContinuationPrompt(issue domain.Issue, attempt *int, resumeSessionID string) string {
+	attemptNumber := 1
+	if attempt != nil {
+		attemptNumber = *attempt
+	}
+
+	out := "# Spur continuation: " + issue.Identifier + "\n\n"
+	out += "You are resuming an existing Codex thread for Linear issue " + issue.Identifier + ": " + issue.Title + ".\n"
+	if issue.URL != "" {
+		out += "Issue URL: " + issue.URL + "\n"
+	}
+	if issue.BranchName != "" {
+		out += "Expected branch: " + issue.BranchName + "\n"
+	}
+	if issue.State != "" {
+		out += "Tracker state at dispatch: " + issue.State + "\n"
+	}
+	out += "Resume session: " + resumeSessionID + "\n"
+	out += "Continuation attempt: " + fmt.Sprint(attemptNumber) + "\n\n"
+	out += "Use the prior thread context and current repository state as authoritative. Do not restart the task or re-run the full original workflow unless current evidence shows it is necessary.\n\n"
+	out += "Finish only the missing work needed to hand off this issue:\n"
+	out += "1. Confirm the implementation and verification are complete for " + issue.Identifier + ".\n"
+	out += "2. Ensure there is a PR against main and that the PR title includes " + issue.Identifier + ".\n"
+	out += "3. Post the Linear closeout comment with the PR link, acceptance-criteria evidence, drift from spec if any, and artifacts if any.\n"
+	out += "4. Move the Linear issue to In Review.\n\n"
+	out += "If a required artifact already exists, do not duplicate it. If you discover a genuine blocker, post the blocker details on Linear and transition the issue to Needs Human.\n"
+	return out
+}
+
 func issueToBindings(i domain.Issue) map[string]any {
 	bindings := map[string]any{
 		"id":          i.ID,

@@ -86,6 +86,49 @@ func TestRender_RealWorkflowTemplate(t *testing.T) {
 	}
 }
 
+func TestRenderAgentPromptUsesFullTemplateForFirstAttempt(t *testing.T) {
+	t.Parallel()
+	out, err := RenderAgentPrompt("full prompt for {{ issue.identifier }}", domain.Issue{
+		Identifier: "SAM-59",
+	}, nil, "")
+	if err != nil {
+		t.Fatalf("RenderAgentPrompt: %v", err)
+	}
+	if out != "full prompt for SAM-59" {
+		t.Fatalf("prompt = %q, want full rendered template", out)
+	}
+}
+
+func TestRenderAgentPromptUsesConciseContinuationForResume(t *testing.T) {
+	t.Parallel()
+	attempt := 1
+	out, err := RenderAgentPrompt("full prompt should not be replayed", domain.Issue{
+		Identifier: "SAM-59",
+		Title:      "Use continuation prompts",
+		State:      "In Progress",
+		URL:        "https://linear.app/samcorp/issue/SAM-59",
+		BranchName: "sasilver0051/sam-59",
+	}, &attempt, "session-1")
+	if err != nil {
+		t.Fatalf("RenderAgentPrompt: %v", err)
+	}
+	for _, want := range []string{
+		"Spur continuation: SAM-59",
+		"Resume session: session-1",
+		"Continuation attempt: 1",
+		"PR against main",
+		"Linear closeout comment",
+		"Move the Linear issue to In Review",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("continuation prompt missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "full prompt should not be replayed") {
+		t.Fatalf("continuation prompt replayed full template:\n%s", out)
+	}
+}
+
 func firstN(s string, n int) string {
 	if len(s) < n {
 		return s
