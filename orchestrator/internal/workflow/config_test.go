@@ -18,6 +18,9 @@ func TestNewServiceConfig_AppliesDefaults(t *testing.T) {
 	if cfg.Agent.MaxConcurrentAgents != 10 {
 		t.Errorf("Agent.MaxConcurrentAgents default = %d", cfg.Agent.MaxConcurrentAgents)
 	}
+	if cfg.Agent.MaxConcurrentAgentsByState != nil {
+		t.Errorf("Agent.MaxConcurrentAgentsByState default = %v, want nil", cfg.Agent.MaxConcurrentAgentsByState)
+	}
 	if cfg.Agent.MaxUnproductiveSuccess != 3 {
 		t.Errorf("Agent.MaxUnproductiveSuccess default = %d", cfg.Agent.MaxUnproductiveSuccess)
 	}
@@ -52,7 +55,11 @@ func TestNewServiceConfig_OverridesFromFrontMatter(t *testing.T) {
 			"base_image": "spur-base",
 		},
 		"agent": map[string]any{
-			"max_concurrent_agents":      2,
+			"max_concurrent_agents": 2,
+			"max_concurrent_agents_by_state": map[string]any{
+				"Ready":       2,
+				"In Progress": "1",
+			},
 			"max_unproductive_successes": 2,
 			"runner":                     "codex",
 		},
@@ -92,6 +99,15 @@ func TestNewServiceConfig_OverridesFromFrontMatter(t *testing.T) {
 	}
 	if cfg.Agent.MaxConcurrentAgents != 2 {
 		t.Errorf("Agent.MaxConcurrentAgents = %d", cfg.Agent.MaxConcurrentAgents)
+	}
+	if cfg.Agent.MaxConcurrentAgentsByState["ready"] != 2 {
+		t.Errorf("Agent.MaxConcurrentAgentsByState[ready] = %d", cfg.Agent.MaxConcurrentAgentsByState["ready"])
+	}
+	if cfg.Agent.MaxConcurrentAgentsByState["in progress"] != 1 {
+		t.Errorf("Agent.MaxConcurrentAgentsByState[in progress] = %d", cfg.Agent.MaxConcurrentAgentsByState["in progress"])
+	}
+	if _, ok := cfg.Agent.MaxConcurrentAgentsByState["Ready"]; ok {
+		t.Errorf("Agent.MaxConcurrentAgentsByState contains non-normalized key Ready: %v", cfg.Agent.MaxConcurrentAgentsByState)
 	}
 	if cfg.Agent.MaxUnproductiveSuccess != 2 {
 		t.Errorf("Agent.MaxUnproductiveSuccess = %d", cfg.Agent.MaxUnproductiveSuccess)
@@ -309,5 +325,11 @@ func TestNewServiceConfig_RealWorkflowFile(t *testing.T) {
 	}
 	if cfg.Workspace.BaseImage != "spur-base" {
 		t.Errorf("Workspace.BaseImage = %q (expected spur-base)", cfg.Workspace.BaseImage)
+	}
+	if cfg.Agent.MaxConcurrentAgentsByState["ready"] != 2 {
+		t.Errorf("Agent.MaxConcurrentAgentsByState[ready] = %d, want 2", cfg.Agent.MaxConcurrentAgentsByState["ready"])
+	}
+	if cfg.Agent.MaxConcurrentAgentsByState["in progress"] != 1 {
+		t.Errorf("Agent.MaxConcurrentAgentsByState[in progress] = %d, want 1", cfg.Agent.MaxConcurrentAgentsByState["in progress"])
 	}
 }

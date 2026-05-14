@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -176,6 +177,7 @@ func (o *Orchestrator) RunDaemon(ctx context.Context) error {
 	o.Logger.Info("orchestrator starting",
 		"poll_interval_ms", o.Config.Polling.IntervalMs,
 		"max_concurrent_agents", o.Config.Agent.MaxConcurrentAgents,
+		"max_concurrent_agents_by_state", o.Config.Agent.MaxConcurrentAgentsByState,
 		"active_states", o.Config.Tracker.ActiveStates,
 	)
 
@@ -362,6 +364,7 @@ func (o *Orchestrator) reloadWorkflowIfChanged() {
 		"path", path,
 		"poll_interval_ms", cfg.Polling.IntervalMs,
 		"max_concurrent_agents", cfg.Agent.MaxConcurrentAgents,
+		"max_concurrent_agents_by_state", cfg.Agent.MaxConcurrentAgentsByState,
 		"active_states", cfg.Tracker.ActiveStates,
 	)
 }
@@ -691,20 +694,21 @@ func (o *Orchestrator) reconcile(ctx context.Context) {
 		return
 	}
 
-	terminalSet := stringSet(o.Config.Tracker.TerminalStates)
-	activeSet := stringSet(o.Config.Tracker.ActiveStates)
+	terminalSet := normalizedStringSet(o.Config.Tracker.TerminalStates)
+	activeSet := normalizedStringSet(o.Config.Tracker.ActiveStates)
 
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	for id, state := range states {
-		if _, terminal := terminalSet[state]; terminal {
+		stateKey := normalizeStateKey(state)
+		if _, terminal := terminalSet[stateKey]; terminal {
 			o.Logger.Info("issue moved to terminal state mid-run; signaling cleanup",
 				"issue_id", id, "new_state", state)
 			if cancel, ok := o.cancelRunning[id]; ok {
 				cancel()
 			}
 			o.cleanupAfterRun[id] = struct{}{}
-		} else if _, active := activeSet[state]; !active {
+		} else if _, active := activeSet[stateKey]; !active {
 			o.Logger.Info("issue in neither active nor terminal state",
 				"issue_id", id, "state", state)
 			if cancel, ok := o.cancelRunning[id]; ok {
@@ -723,6 +727,10 @@ func (o *Orchestrator) dispatchUpToCapacity(ctx context.Context, sorted []domain
 		if availableSlots <= 0 {
 			o.mu.Unlock()
 			return
+		}
+		if !o.hasStateCapacityLocked(issue.State) {
+			o.mu.Unlock()
+			continue
 		}
 		if _, running := o.state.Running[issue.ID]; running {
 			o.mu.Unlock()
@@ -754,6 +762,25 @@ func (o *Orchestrator) dispatchUpToCapacity(ctx context.Context, sorted []domain
 
 		go o.runWorker(runCtx, issue, attempt, resumeSessionID)
 	}
+}
+
+func (o *Orchestrator) hasStateCapacityLocked(state string) bool {
+	limits := o.Config.Agent.MaxConcurrentAgentsByState
+	if len(limits) == 0 {
+		return true
+	}
+	stateKey := normalizeStateKey(state)
+	limit, limited := limits[stateKey]
+	if !limited {
+		return true
+	}
+	running := 0
+	for _, entry := range o.state.Running {
+		if normalizeStateKey(entry.Issue.State) == stateKey {
+			running++
+		}
+	}
+	return running < limit
 }
 
 func (o *Orchestrator) readyAttemptForLocked(issueID string) *int {
@@ -898,12 +925,16 @@ func backoffDelay(attempt, maxBackoffMs int) time.Duration {
 	return time.Duration(base) * time.Millisecond
 }
 
-func stringSet(items []string) map[string]struct{} {
+func normalizedStringSet(items []string) map[string]struct{} {
 	m := make(map[string]struct{}, len(items))
 	for _, s := range items {
-		m[s] = struct{}{}
+		m[normalizeStateKey(s)] = struct{}{}
 	}
 	return m
+}
+
+func normalizeStateKey(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
 }
 
 func toString(v any) string {

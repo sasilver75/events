@@ -60,11 +60,12 @@ type HooksConfig struct {
 
 // AgentConfig is the typed view of `agent.*`. Symphony spec §5.3.5.
 type AgentConfig struct {
-	MaxConcurrentAgents    int
-	MaxTurns               int
-	MaxRetryBackoffMs      int
-	MaxUnproductiveSuccess int
-	Runner                 string // currently only "codex" is supported
+	MaxConcurrentAgents        int
+	MaxConcurrentAgentsByState map[string]int // normalized lower-case tracker state name -> cap
+	MaxTurns                   int
+	MaxRetryBackoffMs          int
+	MaxUnproductiveSuccess     int
+	Runner                     string // currently only "codex" is supported
 }
 
 // CredentialsConfig is a Spur extension that makes the current secret boundary
@@ -107,11 +108,12 @@ func NewServiceConfig(raw map[string]any) ServiceConfig {
 		Workspace: WorkspaceConfig{Root: defaultWorkspaceRoot()},
 		Hooks:     HooksConfig{TimeoutMs: 60000},
 		Agent: AgentConfig{
-			MaxConcurrentAgents:    10,
-			MaxTurns:               20,
-			MaxRetryBackoffMs:      300000,
-			MaxUnproductiveSuccess: 3,
-			Runner:                 "codex",
+			MaxConcurrentAgents:        10,
+			MaxConcurrentAgentsByState: nil,
+			MaxTurns:                   20,
+			MaxRetryBackoffMs:          300000,
+			MaxUnproductiveSuccess:     3,
+			Runner:                     "codex",
 		},
 		Credentials: CredentialsConfig{LinearAccess: "host_proxy"},
 		Codex: CodexConfig{
@@ -166,6 +168,9 @@ func NewServiceConfig(raw map[string]any) ServiceConfig {
 	if a, ok := raw["agent"].(map[string]any); ok {
 		if v := intField(a, "max_concurrent_agents"); v > 0 {
 			cfg.Agent.MaxConcurrentAgents = v
+		}
+		if v := intMapField(a, "max_concurrent_agents_by_state"); v != nil {
+			cfg.Agent.MaxConcurrentAgentsByState = v
 		}
 		if v := intField(a, "max_turns"); v > 0 {
 			cfg.Agent.MaxTurns = v
@@ -328,6 +333,50 @@ func stringSliceField(m map[string]any, key string) []string {
 		}
 	}
 	return out
+}
+
+// intMapField extracts a string->positive-int map. State keys are normalized
+// lower-case at config load so dispatch can compare tracker state names
+// consistently without mutating the display state stored on issues.
+func intMapField(m map[string]any, key string) map[string]int {
+	raw, ok := m[key].(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]int, len(raw))
+	for state, value := range raw {
+		normalized := strings.ToLower(strings.TrimSpace(state))
+		if normalized == "" {
+			continue
+		}
+		n := intValue(value)
+		if n <= 0 {
+			continue
+		}
+		out[normalized] = n
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func intValue(raw any) int {
+	switch v := raw.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+			return 0
+		}
+		return n
+	}
+	return 0
 }
 
 // parseAPIKeyRef splits the tracker api_key into its literal or env-reference

@@ -1,8 +1,6 @@
 package linear
 
-import (
-	"github.com/sasilver75/events/orchestrator/internal/domain"
-)
+import "github.com/sasilver75/events/orchestrator/internal/domain"
 
 // EligibilityFilter encodes Spur's pickup criteria as an overlay on top of
 // Symphony's base candidate filter (active state + not running/claimed).
@@ -41,7 +39,7 @@ var SpurDefault = EligibilityFilter{
 func (f EligibilityFilter) Apply(issues []domain.Issue) (eligible []domain.Issue, rejected []Rejection) {
 	terminalSet := make(map[string]struct{}, len(f.TerminalStates))
 	for _, s := range f.TerminalStates {
-		terminalSet[s] = struct{}{}
+		terminalSet[normalizeStateKey(s)] = struct{}{}
 	}
 
 	for _, issue := range issues {
@@ -80,7 +78,7 @@ type Rejection struct {
 
 func firstOpenBlocker(issue domain.Issue, terminalSet map[string]struct{}) string {
 	for _, b := range issue.BlockedBy {
-		if _, terminal := terminalSet[b.State]; !terminal {
+		if _, terminal := terminalSet[normalizeStateKey(b.State)]; !terminal {
 			return b.Identifier
 		}
 	}

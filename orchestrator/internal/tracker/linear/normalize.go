@@ -125,3 +125,7 @@ func parseTime(s string) time.Time {
 	}
 	return time.Time{}
 }
+
+func normalizeStateKey(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
