@@ -29,7 +29,8 @@ hooks:
   # Hooks run on the host with these env vars available:
   #   SPUR_VM_NAME, SPUR_VM_IP, SPUR_ISSUE_ID, SPUR_ISSUE_IDENTIFIER,
   #   SPUR_ISSUE_JSON, SPUR_GITHUB_TOKEN, SPUR_LINEAR_TOKEN,
-  #   SPUR_RUN_LOG_DIR, SPUR_SSH_KEY, SPUR_HARNESS_CLAUDE_DIR
+  #   SPUR_RUN_LOG_DIR, SPUR_SSH_KEY, SPUR_HARNESS_CLAUDE_DIR,
+  #   SPUR_HARNESS_CODEX_DIR
   #
   # SSH connections always pass -i "$SPUR_SSH_KEY" so the harness key is used
   # explicitly (not whatever default key the host happens to have).
@@ -58,7 +59,7 @@ hooks:
 
   before_run: |
     # Runs before each agent attempt. Injects credentials, the current issue
-    # snapshot, and the harness Claude Code identity.
+    # snapshot, and optional agent identity snapshots.
     SSH_OPTS=(-i "$SPUR_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 
     # 1. Ship the harness ~/.claude/ snapshot into the VM (replaces any
@@ -86,12 +87,22 @@ hooks:
     EOS
     fi
 
-    # 2. Write the issue snapshot to /tmp inside the VM.
+    # 2. Optionally ship a filtered ~/.codex/ snapshot into the VM for Codex
+    #    canary runs. Leave SPUR_HARNESS_CODEX_DIR empty to rely on whatever
+    #    Codex identity already exists in the VM.
+    if [ -n "${SPUR_HARNESS_CODEX_DIR:-}" ] && [ -d "$SPUR_HARNESS_CODEX_DIR" ]; then
+      ssh "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP" 'rm -rf ~/.codex && mkdir -p ~/.codex && chmod 700 ~/.codex'
+      scp -r "${SSH_OPTS[@]}" "$SPUR_HARNESS_CODEX_DIR"/. admin@"$SPUR_VM_IP":'~/.codex/'
+    fi
+
+    # 3. Write the issue snapshot to /tmp inside the VM.
     printf '%s' "$SPUR_ISSUE_JSON" | ssh "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP" 'cat > /tmp/issue.json'
 
-    # 3. Refresh the git remote URL with the current PAT (in case the
+    # 4. Refresh the git remote URL with the current PAT (in case the
     #    token was rotated between runs) and write the credentials.env
-    #    file for any agent tooling that reads it.
+    #    file for any agent tooling that reads it. In host_proxy mode
+    #    SPUR_LINEAR_TOKEN is intentionally empty; Codex uses the host-side
+    #    linear_graphql dynamic tool instead.
     ssh "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP" 'bash -s' <<EOS
     set -euo pipefail
     if [ -d "\$HOME/events/.git" ]; then
@@ -113,6 +124,7 @@ hooks:
     SSH_OPTS=(-i "$SPUR_SSH_KEY" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
     mkdir -p "$SPUR_RUN_LOG_DIR"
     scp -r "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP":'~/.claude/projects' "$SPUR_RUN_LOG_DIR/claude-projects" 2>/dev/null || true
+    scp -r "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP":'~/.codex/log' "$SPUR_RUN_LOG_DIR/codex-log" 2>/dev/null || true
     scp "${SSH_OPTS[@]}" admin@"$SPUR_VM_IP":'/tmp/issue.json' "$SPUR_RUN_LOG_DIR/issue.json" 2>/dev/null || true
 
   before_remove: |
@@ -124,11 +136,26 @@ hooks:
   timeout_ms: 600000
 
 agent:
+  # Current production runner. `codex` is scaffolded behind the same runner
+  # interface with a minimal app-server protocol client, but Claude Code stays
+  # the default until the Codex path is exercised on real issues.
+  runner: claudecode
   # Capped at 2 by Apple's macOS-guest license. Raising past 2 will be
   # silently ignored by the host (the 3rd boot will fail).
   max_concurrent_agents: 2
   max_turns: 20
   max_retry_backoff_ms: 300000
+  # If successful agent turns keep leaving the issue active, stop dispatching
+  # before burning the full max_turns budget. Operator should inspect for a
+  # missing closeout comment / In Review transition.
+  max_unproductive_successes: 3
+
+credentials:
+  # Current production mode. Linear credentials are injected into the VM as
+  # LINEAR_API_KEY for the agent's CLI/API calls. `host_proxy` is implemented
+  # only for agent.runner=codex, where Linear calls go through the host-side
+  # linear_graphql dynamic tool.
+  linear_access: vm_env
 
 claudecode:
   # Spur-specific section (Symphony spec uses `codex`; we substitute Claude Code).
@@ -176,10 +203,34 @@ Labels: {{ issue.labels | join: ", " }}
 - **[docs/agents/](./docs/agents/)** — agent-specific guides (issue tracker,
   triage labels, this harness).
 
+## Linear access
+
+If `LINEAR_API_KEY` is present and non-empty in your environment, use it for
+Linear API comments and state transitions. If it is absent/empty and a
+`linear_graphql` tool is available, use that tool for Linear GraphQL operations
+instead; the host keeps the Linear credential and forwards only the GraphQL
+request/response.
+
 ## Lifecycle for this run
 
 You must follow these steps in order. Each step has explicit success criteria.
 Do not skip steps. Do not proceed past a failed verification step.
+
+## Required handoff artifacts before exit
+
+Do not end a successful run until all of these are true:
+
+- The issue has a pickup comment for this attempt.
+- The issue state is `In Progress` while you are working.
+- Your branch is pushed and a PR against `main` exists.
+- The PR description links to {{ issue.identifier }} and includes the required self-assessment line.
+- The Linear closeout comment exists and uses the exact structure in step 8.
+- The issue state is `In Review`.
+
+If you have opened a PR but any closeout item is missing, your next action is
+to finish the missing Linear comment/state transition. Do not continue coding
+or start unrelated cleanup. A run with a PR but no closeout comment and no
+`In Review` transition is incomplete.
 
 ### 1. Acknowledge pickup
 
@@ -287,6 +338,10 @@ Post a comment on {{ issue.identifier }} with this exact structure:
 
 Move the Linear issue from `In Progress` to `In Review`. This is the
 handoff signal.
+
+Before exiting, re-check the required handoff artifacts list above. If the PR
+exists but the closeout comment or `In Review` transition is missing, complete
+those missing steps immediately.
 
 ## Edge cases
 

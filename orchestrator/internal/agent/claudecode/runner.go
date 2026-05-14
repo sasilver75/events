@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sasilver75/events/orchestrator/internal/agent"
 	"github.com/sasilver75/events/orchestrator/internal/workspace/tart"
 )
 
@@ -42,14 +43,7 @@ type Runner struct {
 	Env map[string]string
 }
 
-// RunResult summarizes how a turn ended.
-type RunResult struct {
-	Type      EventType // terminal event type
-	SessionID string    // session/thread ID for continuation
-	Error     string
-	Usage     Usage
-	Duration  time.Duration
-}
+type RunResult = agent.RunResult
 
 // Run invokes Claude Code once inside the VM at `vmIP` with `prompt` as
 // the user message. Events are streamed to `onEvent` as they arrive.
@@ -112,6 +106,12 @@ func (r *Runner) Run(ctx context.Context, vmIP, prompt, resume string, onEvent f
 		if ev.SessionID != "" && result.SessionID == "" {
 			result.SessionID = ev.SessionID
 		}
+		if ev.ThreadID != "" {
+			result.ThreadID = ev.ThreadID
+		}
+		if ev.TurnID != "" {
+			result.TurnID = ev.TurnID
+		}
 		if onEvent != nil {
 			onEvent(ev)
 		}
@@ -124,7 +124,7 @@ func (r *Runner) Run(ctx context.Context, vmIP, prompt, resume string, onEvent f
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return RunResult{Type: EventTurnFailed, Error: err.Error(), Duration: time.Since(start), SessionID: result.SessionID},
+		return RunResult{Type: EventTurnFailed, Error: err.Error(), Duration: time.Since(start), SessionID: result.SessionID, ThreadID: result.ThreadID, TurnID: result.TurnID},
 			fmt.Errorf("scanner: %w (stderr: %s)", err, truncate(stderrBuf.String(), 200))
 	}
 
@@ -148,6 +148,20 @@ func (r *Runner) Run(ctx context.Context, vmIP, prompt, resume string, onEvent f
 	}
 
 	return result, nil
+}
+
+func (r *Runner) WithTurnConfig(cfg agent.TurnConfig) agent.Runner {
+	copy := *r
+	if cfg.Command != "" {
+		copy.Command = cfg.Command
+	}
+	copy.TurnTimeout = cfg.TurnTimeout
+	copy.StallTimeout = cfg.StallTimeout
+	copy.Env = map[string]string{}
+	for k, v := range cfg.Env {
+		copy.Env[k] = v
+	}
+	return &copy
 }
 
 func (r *Runner) buildCommand(prompt, resume string) string {

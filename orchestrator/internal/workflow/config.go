@@ -13,12 +13,14 @@ import (
 // is either deferred (we don't need it for v0) or an extension key the spec
 // permits but doesn't require.
 type ServiceConfig struct {
-	Tracker    TrackerConfig
-	Polling    PollingConfig
-	Workspace  WorkspaceConfig
-	Hooks      HooksConfig
-	Agent      AgentConfig
-	ClaudeCode ClaudeCodeConfig
+	Tracker     TrackerConfig
+	Polling     PollingConfig
+	Workspace   WorkspaceConfig
+	Hooks       HooksConfig
+	Agent       AgentConfig
+	Credentials CredentialsConfig
+	ClaudeCode  ClaudeCodeConfig
+	Codex       CodexConfig
 }
 
 // TrackerConfig is the typed view of `tracker.*`. Symphony spec §5.3.1.
@@ -55,9 +57,18 @@ type HooksConfig struct {
 
 // AgentConfig is the typed view of `agent.*`. Symphony spec §5.3.5.
 type AgentConfig struct {
-	MaxConcurrentAgents int
-	MaxTurns            int
-	MaxRetryBackoffMs   int
+	MaxConcurrentAgents    int
+	MaxTurns               int
+	MaxRetryBackoffMs      int
+	MaxUnproductiveSuccess int
+	Runner                 string // "claudecode" today, "codex" when explicitly selected
+}
+
+// CredentialsConfig is a Spur extension that makes the current secret boundary
+// explicit. `vm_env` injects tracker credentials into the VM; `host_proxy`
+// keeps the Linear token on the host and is only valid for the Codex runner.
+type CredentialsConfig struct {
+	LinearAccess string
 }
 
 // ClaudeCodeConfig is the Spur substitution for spec §5.3.6 `codex`.
@@ -69,12 +80,24 @@ type ClaudeCodeConfig struct {
 	StallTimeoutMs int
 }
 
+// CodexConfig is the typed view of Symphony's reference `codex` section.
+// Spur parses it now so Codex can be introduced alongside Claude Code without
+// changing the rest of the workflow schema.
+type CodexConfig struct {
+	Command        string
+	TurnTimeoutMs  int
+	ReadTimeoutMs  int
+	StallTimeoutMs int
+}
+
 // Validation error categories. Symphony spec §6.3.
 var (
-	ErrUnsupportedTracker  = errors.New("unsupported_tracker_kind")
-	ErrMissingTrackerKind  = errors.New("missing_tracker_kind")
-	ErrMissingProjectSlug  = errors.New("missing_tracker_project_slug")
-	ErrMissingCodexCommand = errors.New("missing_claudecode_command")
+	ErrUnsupportedTracker      = errors.New("unsupported_tracker_kind")
+	ErrUnsupportedRunner       = errors.New("unsupported_agent_runner")
+	ErrMissingTrackerKind      = errors.New("missing_tracker_kind")
+	ErrMissingProjectSlug      = errors.New("missing_tracker_project_slug")
+	ErrMissingCodexCommand     = errors.New("missing_claudecode_command")
+	ErrUnsupportedLinearAccess = errors.New("unsupported_linear_access_mode")
 )
 
 // NewServiceConfig builds a ServiceConfig from a parsed Definition's raw
@@ -91,12 +114,21 @@ func NewServiceConfig(raw map[string]any) ServiceConfig {
 		Workspace: WorkspaceConfig{Root: defaultWorkspaceRoot()},
 		Hooks:     HooksConfig{TimeoutMs: 60000},
 		Agent: AgentConfig{
-			MaxConcurrentAgents: 10,
-			MaxTurns:            20,
-			MaxRetryBackoffMs:   300000,
+			MaxConcurrentAgents:    10,
+			MaxTurns:               20,
+			MaxRetryBackoffMs:      300000,
+			MaxUnproductiveSuccess: 3,
+			Runner:                 "claudecode",
 		},
+		Credentials: CredentialsConfig{LinearAccess: "vm_env"},
 		ClaudeCode: ClaudeCodeConfig{
 			Command:        "claude --print --output-format=stream-json --permission-mode bypassPermissions",
+			TurnTimeoutMs:  3600000,
+			ReadTimeoutMs:  5000,
+			StallTimeoutMs: 300000,
+		},
+		Codex: CodexConfig{
+			Command:        "codex app-server",
 			TurnTimeoutMs:  3600000,
 			ReadTimeoutMs:  5000,
 			StallTimeoutMs: 300000,
@@ -151,6 +183,18 @@ func NewServiceConfig(raw map[string]any) ServiceConfig {
 		if v := intField(a, "max_retry_backoff_ms"); v > 0 {
 			cfg.Agent.MaxRetryBackoffMs = v
 		}
+		if v := intField(a, "max_unproductive_successes"); v > 0 {
+			cfg.Agent.MaxUnproductiveSuccess = v
+		}
+		if v := stringField(a, "runner"); v != "" {
+			cfg.Agent.Runner = v
+		}
+	}
+
+	if c, ok := raw["credentials"].(map[string]any); ok {
+		if v := stringField(c, "linear_access"); v != "" {
+			cfg.Credentials.LinearAccess = v
+		}
 	}
 
 	if c, ok := raw["claudecode"].(map[string]any); ok {
@@ -168,6 +212,21 @@ func NewServiceConfig(raw map[string]any) ServiceConfig {
 		}
 	}
 
+	if c, ok := raw["codex"].(map[string]any); ok {
+		if v := stringField(c, "command"); v != "" {
+			cfg.Codex.Command = v
+		}
+		if v := intField(c, "turn_timeout_ms"); v > 0 {
+			cfg.Codex.TurnTimeoutMs = v
+		}
+		if v := intField(c, "read_timeout_ms"); v > 0 {
+			cfg.Codex.ReadTimeoutMs = v
+		}
+		if v := intField(c, "stall_timeout_ms"); v > 0 {
+			cfg.Codex.StallTimeoutMs = v
+		}
+	}
+
 	return cfg
 }
 
@@ -182,10 +241,63 @@ func (c ServiceConfig) Validate() error {
 	if c.Tracker.Kind == "linear" && c.Tracker.ProjectSlug == "" {
 		return ErrMissingProjectSlug
 	}
-	if c.ClaudeCode.Command == "" {
-		return ErrMissingCodexCommand
+	switch c.LinearAccessMode() {
+	case "vm_env":
+	case "host_proxy":
+		if c.AgentRunnerName() != "codex" {
+			return fmt.Errorf("%w: %q requires agent.runner=codex", ErrUnsupportedLinearAccess, c.Credentials.LinearAccess)
+		}
+	default:
+		return fmt.Errorf("%w: %q", ErrUnsupportedLinearAccess, c.Credentials.LinearAccess)
+	}
+	switch c.AgentRunnerName() {
+	case "claudecode":
+		if c.ClaudeCode.Command == "" {
+			return ErrMissingCodexCommand
+		}
+	case "codex":
+		if c.Codex.Command == "" {
+			return ErrMissingCodexCommand
+		}
+	default:
+		return fmt.Errorf("%w: %q", ErrUnsupportedRunner, c.Agent.Runner)
 	}
 	return nil
+}
+
+func (c ServiceConfig) AgentCommand() string {
+	if c.AgentRunnerName() == "codex" {
+		return c.Codex.Command
+	}
+	return c.ClaudeCode.Command
+}
+
+func (c ServiceConfig) AgentTurnTimeoutMs() int {
+	if c.AgentRunnerName() == "codex" {
+		return c.Codex.TurnTimeoutMs
+	}
+	return c.ClaudeCode.TurnTimeoutMs
+}
+
+func (c ServiceConfig) AgentStallTimeoutMs() int {
+	if c.AgentRunnerName() == "codex" {
+		return c.Codex.StallTimeoutMs
+	}
+	return c.ClaudeCode.StallTimeoutMs
+}
+
+func (c ServiceConfig) AgentRunnerName() string {
+	if c.Agent.Runner == "" {
+		return "claudecode"
+	}
+	return c.Agent.Runner
+}
+
+func (c ServiceConfig) LinearAccessMode() string {
+	if c.Credentials.LinearAccess == "" {
+		return "vm_env"
+	}
+	return c.Credentials.LinearAccess
 }
 
 // stringField extracts a string field from a YAML-decoded map, returning ""

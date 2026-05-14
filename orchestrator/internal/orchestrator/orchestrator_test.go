@@ -2,13 +2,18 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/sasilver75/events/orchestrator/internal/agent"
 	"github.com/sasilver75/events/orchestrator/internal/domain"
 	"github.com/sasilver75/events/orchestrator/internal/tracker/linear"
 	"github.com/sasilver75/events/orchestrator/internal/workflow"
@@ -84,18 +89,34 @@ func (f *fakeTracker) FetchIssuesByStates(ctx context.Context, _ []string) ([]do
 	return f.terminal, nil
 }
 
+type escalatingFakeTracker struct {
+	*fakeTracker
+	mu              sync.Mutex
+	escalationCalls []needsHumanEscalation
+	err             error
+}
+
+func (f *escalatingFakeTracker) EscalateNeedsHuman(ctx context.Context, issue domain.Issue, reason string, attempts int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.escalationCalls = append(f.escalationCalls, needsHumanEscalation{issue: issue, reason: reason, attempts: attempts})
+	return f.err
+}
+
 // recordingWorker captures every issue it was asked to run, then reports
 // the canned result.
 type recordingWorker struct {
-	mu            sync.Mutex
-	calls         []string
-	attempts      []*int
-	resumes       []string
-	cleanupCalls  []string
-	canceled      bool
-	waitForCancel bool
-	result        WorkerResult
-	delay         time.Duration
+	mu             sync.Mutex
+	calls          []string
+	attempts       []*int
+	resumes        []string
+	cleanupCalls   []string
+	workflowCfg    workflow.ServiceConfig
+	workflowPrompt string
+	canceled       bool
+	waitForCancel  bool
+	result         WorkerResult
+	delay          time.Duration
 }
 
 func (w *recordingWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, resumeSessionID string) WorkerResult {
@@ -131,6 +152,52 @@ func (w *recordingWorker) Cleanup(ctx context.Context, issue domain.Issue) error
 	defer w.mu.Unlock()
 	w.cleanupCalls = append(w.cleanupCalls, issue.Identifier)
 	return nil
+}
+
+func (w *recordingWorker) UpdateWorkflow(def *workflow.Definition, cfg workflow.ServiceConfig) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.workflowCfg = cfg
+	w.workflowPrompt = def.PromptTemplate
+}
+
+func TestSpurWorkerAgentTurnConfigCredentialModes(t *testing.T) {
+	t.Parallel()
+	tool := agent.DynamicTool{Name: "linear_graphql"}
+	w := &SpurWorker{
+		HarnessCreds: Credentials{
+			GitHubToken: "gh_test",
+			LinearToken: "lin_test",
+		},
+		DynamicTools: []agent.DynamicTool{tool},
+	}
+
+	vmEnvCfg := validConfig()
+	vmEnvCfg.Credentials.LinearAccess = "vm_env"
+	vmEnvTurn := w.agentTurnConfig(vmEnvCfg)
+	if vmEnvTurn.Env["GITHUB_TOKEN"] != "gh_test" {
+		t.Fatalf("GITHUB_TOKEN = %q", vmEnvTurn.Env["GITHUB_TOKEN"])
+	}
+	if vmEnvTurn.Env["LINEAR_API_KEY"] != "lin_test" {
+		t.Fatalf("LINEAR_API_KEY = %q", vmEnvTurn.Env["LINEAR_API_KEY"])
+	}
+	if len(vmEnvTurn.DynamicTools) != 0 {
+		t.Fatalf("vm_env dynamic tools = %+v", vmEnvTurn.DynamicTools)
+	}
+
+	hostProxyCfg := validConfig()
+	hostProxyCfg.Agent.Runner = "codex"
+	hostProxyCfg.Credentials.LinearAccess = "host_proxy"
+	hostProxyTurn := w.agentTurnConfig(hostProxyCfg)
+	if hostProxyTurn.Env["GITHUB_TOKEN"] != "gh_test" {
+		t.Fatalf("GITHUB_TOKEN = %q", hostProxyTurn.Env["GITHUB_TOKEN"])
+	}
+	if _, ok := hostProxyTurn.Env["LINEAR_API_KEY"]; ok {
+		t.Fatalf("host_proxy should not pass LINEAR_API_KEY: %+v", hostProxyTurn.Env)
+	}
+	if len(hostProxyTurn.DynamicTools) != 1 || hostProxyTurn.DynamicTools[0].Name != "linear_graphql" {
+		t.Fatalf("host_proxy dynamic tools = %+v", hostProxyTurn.DynamicTools)
+	}
 }
 
 func TestRunOnce_DispatchesSingleIssue(t *testing.T) {
@@ -180,6 +247,33 @@ func TestRunOnce_NoEligibleIssues(t *testing.T) {
 	}
 }
 
+func TestRunOnce_ExplicitIssueMustBeEligible(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{
+		ID:         "uuid-1",
+		Identifier: "SAM-12",
+		Title:      "Test",
+		State:      "Ready",
+		Labels:     []string{"feature"},
+	}
+	tracker := &fakeTracker{candidates: []domain.Issue{issue}}
+	worker := &recordingWorker{result: WorkerResult{Status: domain.RunStatusSucceeded}}
+
+	o := New(nil, validConfig(), tracker, worker, silentLogger())
+	err := o.RunOnce(context.Background(), "SAM-12")
+	if err == nil {
+		t.Fatal("expected eligibility error")
+	}
+	if !strings.Contains(err.Error(), "missing_required_label:afk") {
+		t.Fatalf("error = %q, want missing afk reason", err)
+	}
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	if len(worker.calls) != 0 {
+		t.Fatalf("worker should not have been called: %v", worker.calls)
+	}
+}
+
 func TestRunOnce_IssueNotFound(t *testing.T) {
 	t.Parallel()
 	tracker := &fakeTracker{candidates: nil}
@@ -205,6 +299,106 @@ func TestRunOnce_PropagatesWorkerFailure(t *testing.T) {
 	err := o.RunOnce(context.Background(), "SAM-12")
 	if err == nil {
 		t.Error("expected error from failed worker")
+	}
+}
+
+func TestRunOnceWritesStatusSnapshotWithTelemetry(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{
+		ID:         "uuid-1",
+		Identifier: "SAM-12",
+		State:      "Ready",
+		Labels:     []string{"afk"},
+	}
+	tracker := &fakeTracker{candidates: []domain.Issue{issue}}
+	worker := &recordingWorker{result: WorkerResult{
+		Status:       domain.RunStatusSucceeded,
+		InputTokens:  11,
+		OutputTokens: 7,
+		TotalTokens:  18,
+		SessionID:    "thread-123",
+		ThreadID:     "thread-123",
+		TurnID:       "turn-456",
+		RateLimits: &agent.RateLimitSnapshot{
+			LimitID: "codex",
+		},
+	}}
+	statusPath := filepath.Join(t.TempDir(), "status", "once.json")
+	cfg := validConfig()
+	cfg.Agent.Runner = "codex"
+	cfg.Credentials.LinearAccess = "host_proxy"
+	cfg.Codex.Command = "codex app-server"
+	o := New(nil, cfg, tracker, worker, silentLogger())
+	o.StatusFile = statusPath
+
+	if err := o.RunOnce(context.Background(), "SAM-12"); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var snapshot StatusSnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		t.Fatalf("Unmarshal: %v\n%s", err, data)
+	}
+	if snapshot.CodexTotals.InputTokens != 11 || snapshot.CodexTotals.OutputTokens != 7 || snapshot.CodexTotals.TotalTokens != 18 {
+		t.Fatalf("codex_totals = %+v", snapshot.CodexTotals)
+	}
+	if snapshot.AgentRunner != "codex" || snapshot.LinearAccess != "host_proxy" {
+		t.Fatalf("runner/access = %q/%q, want codex/host_proxy", snapshot.AgentRunner, snapshot.LinearAccess)
+	}
+	if snapshot.CompletedCount != 1 {
+		t.Fatalf("completed_count = %d, want 1", snapshot.CompletedCount)
+	}
+	if len(snapshot.RecentRuns) != 1 {
+		t.Fatalf("recent_runs = %+v, want one run", snapshot.RecentRuns)
+	}
+	recentRun := snapshot.RecentRuns[0]
+	if recentRun.Identifier != "SAM-12" || recentRun.Status != string(domain.RunStatusSucceeded) {
+		t.Fatalf("recent run = %+v", recentRun)
+	}
+	if recentRun.SessionID != "thread-123" {
+		t.Fatalf("recent run session = %q, want thread-123", recentRun.SessionID)
+	}
+	if recentRun.ThreadID != "thread-123" || recentRun.TurnID != "turn-456" {
+		t.Fatalf("recent run thread/turn = %q/%q, want thread-123/turn-456", recentRun.ThreadID, recentRun.TurnID)
+	}
+	if recentRun.TokenInfo.InputTokens != 11 || recentRun.TokenInfo.OutputTokens != 7 || recentRun.TokenInfo.TotalTokens != 18 {
+		t.Fatalf("recent token_info = %+v", recentRun.TokenInfo)
+	}
+	if recentRun.RateLimits == nil {
+		t.Fatal("recent rate_limits missing")
+	}
+	if recentRun.DurationMs < 0 {
+		t.Fatalf("duration_ms = %d, want non-negative", recentRun.DurationMs)
+	}
+	if snapshot.CodexRateLimits == nil {
+		t.Fatal("codex_rate_limits missing")
+	}
+}
+
+func TestRunOnceFailsWhenStatusSnapshotCannotBeWritten(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{
+		ID:         "uuid-1",
+		Identifier: "SAM-12",
+		State:      "Ready",
+		Labels:     []string{"afk"},
+	}
+	tracker := &fakeTracker{candidates: []domain.Issue{issue}}
+	worker := &recordingWorker{result: WorkerResult{Status: domain.RunStatusSucceeded}}
+	statusDir := t.TempDir()
+	o := New(nil, validConfig(), tracker, worker, silentLogger())
+	o.StatusFile = statusDir
+
+	err := o.RunOnce(context.Background(), "SAM-12")
+	if err == nil {
+		t.Fatal("expected status snapshot error")
+	}
+	if !strings.Contains(err.Error(), "status snapshot:") {
+		t.Fatalf("error = %q, want status snapshot context", err)
 	}
 }
 
@@ -255,6 +449,139 @@ func TestHandleWorkerResult_StopsAtMaxTurns(t *testing.T) {
 	}
 	if _, claimed := o.state.Claimed[issue.ID]; !claimed {
 		t.Fatal("issue claim was released after max_turns; want retained for operator review")
+	}
+}
+
+func TestHandleWorkerResult_StopsSuccessfulContinuationLoop(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1"}
+	cfg := validConfig()
+	cfg.Agent.MaxUnproductiveSuccess = 2
+	o := New(nil, cfg, &fakeTracker{}, &recordingWorker{}, silentLogger())
+	o.state.Claimed[issue.ID] = struct{}{}
+
+	o.handleWorkerResult(WorkerResult{Issue: issue, Status: domain.RunStatusSucceeded})
+	firstRetry := o.retryTimers[issue.ID]
+	if firstRetry == nil {
+		t.Fatal("first successful turn did not schedule continuation")
+	}
+
+	attempt := 1
+	o.handleWorkerResult(WorkerResult{Issue: issue, Attempt: &attempt, Status: domain.RunStatusSucceeded})
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.state.RetryAttempts) != 0 {
+		t.Fatalf("retry attempts = %d, want 0 after loop detection", len(o.state.RetryAttempts))
+	}
+	if _, claimed := o.state.Claimed[issue.ID]; !claimed {
+		t.Fatal("issue claim was released after loop detection; want retained for operator review")
+	}
+	entry, ok := o.state.NeedsHuman[issue.ID]
+	if !ok {
+		t.Fatal("issue was not marked as needing human review")
+	}
+	if entry.Attempts != 2 || entry.Reason != "successful_continuation_loop" {
+		t.Fatalf("needs-human entry = %+v", entry)
+	}
+}
+
+func TestHandleWorkerResult_EscalatesSuccessfulContinuationLoop(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1"}
+	cfg := validConfig()
+	cfg.Agent.MaxUnproductiveSuccess = 2
+	tracker := &escalatingFakeTracker{fakeTracker: &fakeTracker{}}
+	o := New(nil, cfg, tracker, &recordingWorker{}, silentLogger())
+	o.state.Claimed[issue.ID] = struct{}{}
+
+	o.handleWorkerResult(WorkerResult{Issue: issue, Status: domain.RunStatusSucceeded})
+	attempt := 1
+	o.handleWorkerResult(WorkerResult{Issue: issue, Attempt: &attempt, Status: domain.RunStatusSucceeded})
+
+	tracker.mu.Lock()
+	if len(tracker.escalationCalls) != 1 {
+		t.Fatalf("escalation calls = %d, want 1", len(tracker.escalationCalls))
+	}
+	call := tracker.escalationCalls[0]
+	tracker.mu.Unlock()
+	if call.issue.Identifier != "SAM-1" || call.reason != "successful_continuation_loop" || call.attempts != 2 {
+		t.Fatalf("escalation call = %+v", call)
+	}
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	entry := o.state.NeedsHuman[issue.ID]
+	if entry.EscalatedAt.IsZero() {
+		t.Fatalf("needs-human entry was not marked escalated: %+v", entry)
+	}
+	if entry.EscalationError != "" {
+		t.Fatalf("escalation error = %q, want empty", entry.EscalationError)
+	}
+}
+
+func TestHandleWorkerResult_AccumulatesTelemetry(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1"}
+	cfg := validConfig()
+	cfg.Agent.MaxUnproductiveSuccess = 0
+	o := New(nil, cfg, &fakeTracker{}, &recordingWorker{}, silentLogger())
+	o.state.Running[issue.ID] = domain.RunningEntry{
+		Issue:     issue,
+		StartedAt: time.Now().Add(-2 * time.Second),
+	}
+	o.state.Claimed[issue.ID] = struct{}{}
+
+	o.handleWorkerResult(WorkerResult{
+		Issue:        issue,
+		Status:       domain.RunStatusSucceeded,
+		InputTokens:  100,
+		OutputTokens: 25,
+		TotalTokens:  125,
+		RateLimits: &agent.RateLimitSnapshot{
+			LimitID: "codex",
+			Primary: &agent.RateLimitWindow{
+				UsedPercent: 42,
+			},
+		},
+	})
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.state.CodexTotals.InputTokens != 100 {
+		t.Fatalf("input tokens = %d, want 100", o.state.CodexTotals.InputTokens)
+	}
+	if o.state.CodexTotals.OutputTokens != 25 {
+		t.Fatalf("output tokens = %d, want 25", o.state.CodexTotals.OutputTokens)
+	}
+	if o.state.CodexTotals.TotalTokens != 125 {
+		t.Fatalf("total tokens = %d, want 125", o.state.CodexTotals.TotalTokens)
+	}
+	if o.state.CodexTotals.SecondsRunning < 1 {
+		t.Fatalf("seconds running = %d, want at least 1", o.state.CodexTotals.SecondsRunning)
+	}
+	rateLimits, ok := o.state.CodexRateLimits.(*agent.RateLimitSnapshot)
+	if !ok {
+		t.Fatalf("codex rate limits type = %T", o.state.CodexRateLimits)
+	}
+	if rateLimits.LimitID != "codex" || rateLimits.Primary == nil || rateLimits.Primary.UsedPercent != 42 {
+		t.Fatalf("codex rate limits = %+v", rateLimits)
+	}
+}
+
+func TestDispatchSkipsIssuesNeedingHumanReview(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
+	worker := &recordingWorker{result: WorkerResult{Status: domain.RunStatusSucceeded}}
+	o := New(nil, validConfig(), &fakeTracker{}, worker, silentLogger())
+	o.state.NeedsHuman[issue.ID] = domain.NeedsHumanEntry{IssueID: issue.ID, Identifier: issue.Identifier}
+
+	o.dispatchUpToCapacity(context.Background(), []domain.Issue{issue})
+
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	if len(worker.calls) != 0 {
+		t.Fatalf("worker calls = %v, want none", worker.calls)
 	}
 }
 
@@ -334,6 +661,233 @@ func TestCleanupTerminalWorkspaces(t *testing.T) {
 	}
 }
 
+func TestReloadWorkflowIfChangedUpdatesSchedulerAndWorker(t *testing.T) {
+	t.Parallel()
+	path := writeWorkflowForReloadTest(t, 1, 1000, "# Old prompt")
+	def, err := workflow.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cfg := workflow.NewServiceConfig(def.Config)
+	worker := &recordingWorker{}
+	o := New(def, cfg, &fakeTracker{}, worker, silentLogger())
+	if err := o.EnableWorkflowReload(path); err != nil {
+		t.Fatalf("EnableWorkflowReload: %v", err)
+	}
+
+	writeWorkflowForReloadTestAtPath(t, path, 3, 2000, "# New prompt")
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	o.reloadWorkflowIfChanged()
+
+	if o.Config.Agent.MaxConcurrentAgents != 3 {
+		t.Fatalf("orchestrator max_concurrent_agents = %d, want 3", o.Config.Agent.MaxConcurrentAgents)
+	}
+	if o.Workflow.PromptTemplate != "# New prompt" {
+		t.Fatalf("orchestrator prompt = %q, want new prompt", o.Workflow.PromptTemplate)
+	}
+	if got := o.pollInterval(); got != 2*time.Second {
+		t.Fatalf("poll interval = %s, want 2s", got)
+	}
+
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	if worker.workflowCfg.Agent.MaxConcurrentAgents != 3 {
+		t.Fatalf("worker max_concurrent_agents = %d, want 3", worker.workflowCfg.Agent.MaxConcurrentAgents)
+	}
+	if worker.workflowPrompt != "# New prompt" {
+		t.Fatalf("worker prompt = %q, want new prompt", worker.workflowPrompt)
+	}
+}
+
+func TestReloadWorkflowIfChangedSkipsRunnerClassChange(t *testing.T) {
+	t.Parallel()
+	path := writeWorkflowForReloadTest(t, 1, 1000, "# Old prompt")
+	def, err := workflow.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cfg := workflow.NewServiceConfig(def.Config)
+	worker := &recordingWorker{}
+	o := New(def, cfg, &fakeTracker{}, worker, silentLogger())
+	if err := o.EnableWorkflowReload(path); err != nil {
+		t.Fatalf("EnableWorkflowReload: %v", err)
+	}
+
+	writeWorkflowForReloadTestAtPathWithRunner(t, path, "codex", 3, 2000, "# New prompt")
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+
+	o.reloadWorkflowIfChanged()
+
+	if got := o.Config.AgentRunnerName(); got != "claudecode" {
+		t.Fatalf("orchestrator runner = %q, want claudecode", got)
+	}
+	if o.Config.Agent.MaxConcurrentAgents != 1 {
+		t.Fatalf("orchestrator max_concurrent_agents = %d, want original 1", o.Config.Agent.MaxConcurrentAgents)
+	}
+	if o.Workflow.PromptTemplate != "# Old prompt" {
+		t.Fatalf("orchestrator prompt = %q, want old prompt", o.Workflow.PromptTemplate)
+	}
+	if !o.workflowModTime.Equal(info.ModTime()) {
+		t.Fatalf("workflow modtime = %s, want %s", o.workflowModTime, info.ModTime())
+	}
+
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	if worker.workflowCfg.Agent.MaxConcurrentAgents != 0 {
+		t.Fatalf("worker should not have been updated: %+v", worker.workflowCfg)
+	}
+}
+
+func TestStatusSnapshotIncludesRunningAndRetryingWork(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "In Progress"}
+	retryIssue := domain.Issue{ID: "uuid-2", Identifier: "SAM-2"}
+	o := New(nil, validConfig(), &fakeTracker{}, &recordingWorker{}, silentLogger())
+	attempt := 2
+	o.state.Running[issue.ID] = domain.RunningEntry{
+		Issue:     issue,
+		StartedAt: now.Add(-5 * time.Second),
+		Attempt:   &attempt,
+	}
+	o.state.Claimed[issue.ID] = struct{}{}
+	o.state.Claimed[retryIssue.ID] = struct{}{}
+	o.state.CodexTotals = domain.CodexTotals{
+		InputTokens:    10,
+		OutputTokens:   5,
+		TotalTokens:    15,
+		SecondsRunning: 7,
+	}
+	o.state.CodexRateLimits = &agent.RateLimitSnapshot{
+		LimitID: "codex",
+		Primary: &agent.RateLimitWindow{
+			UsedPercent: 65,
+		},
+	}
+	o.state.RecentRuns = []domain.RunAttempt{
+		{
+			IssueID:         "uuid-3",
+			IssueIdentifier: "SAM-3",
+			SessionID:       "thread-3",
+			ThreadID:        "thread-3",
+			TurnID:          "turn-3",
+			StartedAt:       now.Add(-3 * time.Second),
+			FinishedAt:      now.Add(-1 * time.Second),
+			InputTokens:     4,
+			OutputTokens:    2,
+			TotalTokens:     6,
+			RateLimits:      &agent.RateLimitSnapshot{LimitID: "run-codex"},
+			Status:          domain.RunStatusSucceeded,
+		},
+	}
+	o.mu.Lock()
+	o.scheduleRetryLocked(retryIssue, 1, "still active after success", time.Minute)
+	o.mu.Unlock()
+	defer o.retryTimers[retryIssue.ID].Stop()
+
+	snapshot := o.StatusSnapshot(now)
+
+	if snapshot.PollIntervalMs != validConfig().Polling.IntervalMs {
+		t.Fatalf("poll interval = %d", snapshot.PollIntervalMs)
+	}
+	if snapshot.AgentRunner != "claudecode" || snapshot.LinearAccess != "vm_env" {
+		t.Fatalf("runner/access = %q/%q, want claudecode/vm_env", snapshot.AgentRunner, snapshot.LinearAccess)
+	}
+	if len(snapshot.Running) != 1 || snapshot.Running[0].Identifier != "SAM-1" {
+		t.Fatalf("running = %+v, want SAM-1", snapshot.Running)
+	}
+	if snapshot.Running[0].DurationMs != 5000 {
+		t.Fatalf("duration_ms = %d, want 5000", snapshot.Running[0].DurationMs)
+	}
+	if len(snapshot.Retrying) != 1 || snapshot.Retrying[0].Identifier != "SAM-2" {
+		t.Fatalf("retrying = %+v, want SAM-2", snapshot.Retrying)
+	}
+	if len(snapshot.NeedsHuman) != 0 {
+		t.Fatalf("needs_human = %+v, want none", snapshot.NeedsHuman)
+	}
+	if snapshot.ClaimedCount != 2 {
+		t.Fatalf("claimed_count = %d, want 2", snapshot.ClaimedCount)
+	}
+	if snapshot.CodexTotals.TotalTokens != 15 || snapshot.CodexTotals.SecondsRunning != 7 {
+		t.Fatalf("codex_totals = %+v", snapshot.CodexTotals)
+	}
+	if len(snapshot.RecentRuns) != 1 || snapshot.RecentRuns[0].Identifier != "SAM-3" {
+		t.Fatalf("recent_runs = %+v, want SAM-3", snapshot.RecentRuns)
+	}
+	if snapshot.RecentRuns[0].DurationMs != 2000 {
+		t.Fatalf("recent duration_ms = %d, want 2000", snapshot.RecentRuns[0].DurationMs)
+	}
+	if snapshot.RecentRuns[0].SessionID != "thread-3" {
+		t.Fatalf("recent session_id = %q, want thread-3", snapshot.RecentRuns[0].SessionID)
+	}
+	if snapshot.RecentRuns[0].ThreadID != "thread-3" || snapshot.RecentRuns[0].TurnID != "turn-3" {
+		t.Fatalf("recent thread/turn = %q/%q, want thread-3/turn-3", snapshot.RecentRuns[0].ThreadID, snapshot.RecentRuns[0].TurnID)
+	}
+	if snapshot.RecentRuns[0].TokenInfo.TotalTokens != 6 {
+		t.Fatalf("recent token_info = %+v, want total 6", snapshot.RecentRuns[0].TokenInfo)
+	}
+	recentRateLimits, ok := snapshot.RecentRuns[0].RateLimits.(*agent.RateLimitSnapshot)
+	if !ok || recentRateLimits.LimitID != "run-codex" {
+		t.Fatalf("recent rate_limits = %+v", snapshot.RecentRuns[0].RateLimits)
+	}
+	rateLimits, ok := snapshot.CodexRateLimits.(*agent.RateLimitSnapshot)
+	if !ok {
+		t.Fatalf("codex_rate_limits type = %T", snapshot.CodexRateLimits)
+	}
+	if rateLimits.LimitID != "codex" || rateLimits.Primary == nil || rateLimits.Primary.UsedPercent != 65 {
+		t.Fatalf("codex_rate_limits = %+v", rateLimits)
+	}
+}
+
+func TestStatusSnapshotIncludesNeedsHuman(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	o := New(nil, validConfig(), &fakeTracker{}, &recordingWorker{}, silentLogger())
+	o.state.NeedsHuman["uuid-1"] = domain.NeedsHumanEntry{
+		IssueID:    "uuid-1",
+		Identifier: "SAM-1",
+		Reason:     "successful_continuation_loop",
+		Attempts:   3,
+		Since:      now.Add(-time.Minute),
+	}
+
+	snapshot := o.StatusSnapshot(now)
+
+	if len(snapshot.NeedsHuman) != 1 {
+		t.Fatalf("needs_human = %+v, want one entry", snapshot.NeedsHuman)
+	}
+	entry := snapshot.NeedsHuman[0]
+	if entry.Identifier != "SAM-1" || entry.Attempts != 3 || entry.Reason != "successful_continuation_loop" {
+		t.Fatalf("needs_human[0] = %+v", entry)
+	}
+}
+
+func TestWriteJSONAtomicCreatesStatusFile(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "status", "orchestrator.json")
+	if err := writeJSONAtomic(context.Background(), path, map[string]string{"status": "ok"}); err != nil {
+		t.Fatalf("writeJSONAtomic: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.Contains(string(data), `"status": "ok"`) {
+		t.Fatalf("status file contents = %s", data)
+	}
+}
+
 func validConfig() workflow.ServiceConfig {
 	return workflow.ServiceConfig{
 		Tracker: workflow.TrackerConfig{
@@ -345,13 +899,53 @@ func validConfig() workflow.ServiceConfig {
 		},
 		Polling: workflow.PollingConfig{IntervalMs: 30000},
 		Agent: workflow.AgentConfig{
-			MaxConcurrentAgents: 2,
-			MaxTurns:            20,
-			MaxRetryBackoffMs:   300000,
+			MaxConcurrentAgents:    2,
+			MaxTurns:               20,
+			MaxRetryBackoffMs:      300000,
+			MaxUnproductiveSuccess: 3,
 		},
 		ClaudeCode: workflow.ClaudeCodeConfig{
 			Command: "claude --print",
 		},
+	}
+}
+
+func writeWorkflowForReloadTest(t *testing.T, maxConcurrent, pollIntervalMs int, prompt string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "WORKFLOW.md")
+	writeWorkflowForReloadTestAtPath(t, path, maxConcurrent, pollIntervalMs, prompt)
+	return path
+}
+
+func writeWorkflowForReloadTestAtPath(t *testing.T, path string, maxConcurrent, pollIntervalMs int, prompt string) {
+	t.Helper()
+	writeWorkflowForReloadTestAtPathWithRunner(t, path, "", maxConcurrent, pollIntervalMs, prompt)
+}
+
+func writeWorkflowForReloadTestAtPathWithRunner(t *testing.T, path string, runner string, maxConcurrent, pollIntervalMs int, prompt string) {
+	t.Helper()
+	runnerLine := ""
+	if runner != "" {
+		runnerLine = "  runner: " + runner + "\n"
+	}
+	data := []byte(`---
+tracker:
+  kind: linear
+  project_slug: spur
+polling:
+  interval_ms: ` + strconv.Itoa(pollIntervalMs) + `
+agent:
+  max_concurrent_agents: ` + strconv.Itoa(maxConcurrent) + `
+  max_unproductive_successes: 3
+` + runnerLine + `
+claudecode:
+  command: claude --print
+---
+
+` + prompt + `
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
 	}
 }
 

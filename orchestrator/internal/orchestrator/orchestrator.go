@@ -12,10 +12,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/sasilver75/events/orchestrator/internal/agent"
 	"github.com/sasilver75/events/orchestrator/internal/domain"
 	"github.com/sasilver75/events/orchestrator/internal/tracker/linear"
 	"github.com/sasilver75/events/orchestrator/internal/workflow"
@@ -27,6 +29,12 @@ type Tracker interface {
 	FetchCandidateIssues(ctx context.Context, activeStates []string) ([]domain.Issue, error)
 	FetchIssueStatesByIDs(ctx context.Context, ids []string) (map[string]string, error)
 	FetchIssuesByStates(ctx context.Context, states []string) ([]domain.Issue, error)
+}
+
+// NeedsHumanEscalator is the narrow tracker write surface the orchestrator
+// uses when automatic continuation has become unproductive.
+type NeedsHumanEscalator interface {
+	EscalateNeedsHuman(ctx context.Context, issue domain.Issue, reason string, attempts int) error
 }
 
 // Worker runs one ticket end-to-end. The orchestrator hands ownership of
@@ -43,6 +51,13 @@ type CleanupWorker interface {
 	Cleanup(ctx context.Context, issue domain.Issue) error
 }
 
+// WorkflowUpdater is implemented by workers that keep their own workflow
+// snapshot. It lets the daemon refresh prompt/config changes without
+// rebuilding the worker dependency graph.
+type WorkflowUpdater interface {
+	UpdateWorkflow(def *workflow.Definition, cfg workflow.ServiceConfig)
+}
+
 // WorkerResult is what a Worker returns. Maps to Symphony spec §7.2.
 type WorkerResult struct {
 	Issue     domain.Issue
@@ -50,7 +65,13 @@ type WorkerResult struct {
 	Status    domain.RunStatus
 	Error     string
 	SessionID string // for continuation turns
-	Tokens    int
+	ThreadID  string
+	TurnID    string
+
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
+	RateLimits   *agent.RateLimitSnapshot
 }
 
 // Orchestrator is the central scheduler.
@@ -64,6 +85,10 @@ type Orchestrator struct {
 	Eligibility linear.EligibilityFilter
 
 	Logger *slog.Logger
+
+	// StatusFile, when set, receives an atomic JSON snapshot after each
+	// daemon tick. This is an operator surface, not durable scheduler state.
+	StatusFile string
 
 	mu    sync.Mutex
 	state domain.OrchestratorRuntimeState
@@ -80,6 +105,9 @@ type Orchestrator struct {
 	cleanupAfterRun map[string]struct{}
 	readyAttempts   map[string]int
 	readySessions   map[string]string
+
+	workflowPath    string
+	workflowModTime time.Time
 }
 
 // New constructs an Orchestrator with empty runtime state.
@@ -101,6 +129,8 @@ func New(def *workflow.Definition, cfg workflow.ServiceConfig, t Tracker, w Work
 			Claimed:             map[string]struct{}{},
 			RetryAttempts:       map[string]domain.RetryEntry{},
 			Completed:           map[string]struct{}{},
+			NeedsHuman:          map[string]domain.NeedsHumanEntry{},
+			RecentRuns:          []domain.RunAttempt{},
 		},
 		retryTimers:     map[string]*time.Timer{},
 		workerDone:      make(chan WorkerResult, 16),
@@ -109,6 +139,21 @@ func New(def *workflow.Definition, cfg workflow.ServiceConfig, t Tracker, w Work
 		readyAttempts:   map[string]int{},
 		readySessions:   map[string]string{},
 	}
+}
+
+// EnableWorkflowReload makes daemon ticks reload WORKFLOW.md when the file's
+// mtime changes. This covers Symphony's live prompt/config reload shape while
+// preserving Spur's long-lived Linear client and Tart workspace manager.
+func (o *Orchestrator) EnableWorkflowReload(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	o.mu.Lock()
+	o.workflowPath = path
+	o.workflowModTime = info.ModTime()
+	o.mu.Unlock()
+	return nil
 }
 
 // RunDaemon runs the poll loop until ctx is canceled. Symphony spec §8.1.
@@ -124,10 +169,7 @@ func (o *Orchestrator) RunDaemon(ctx context.Context) error {
 		return err
 	}
 	o.cleanupTerminalWorkspaces(ctx)
-	interval := time.Duration(o.Config.Polling.IntervalMs) * time.Millisecond
-	if interval <= 0 {
-		interval = 30 * time.Second
-	}
+	interval := o.pollInterval()
 
 	o.Logger.Info("orchestrator starting",
 		"poll_interval_ms", o.Config.Polling.IntervalMs,
@@ -139,6 +181,7 @@ func (o *Orchestrator) RunDaemon(ctx context.Context) error {
 	if err := o.tick(ctx); err != nil {
 		o.Logger.Error("initial tick failed", "err", err)
 	}
+	_ = o.writeStatusSnapshot(ctx)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -149,6 +192,16 @@ func (o *Orchestrator) RunDaemon(ctx context.Context) error {
 		case <-ticker.C:
 			if err := o.tick(ctx); err != nil {
 				o.Logger.Error("tick failed", "err", err)
+			}
+			_ = o.writeStatusSnapshot(ctx)
+			nextInterval := o.pollInterval()
+			if nextInterval != interval {
+				o.Logger.Info("poll interval reloaded",
+					"old_interval_ms", interval.Milliseconds(),
+					"new_interval_ms", nextInterval.Milliseconds(),
+				)
+				ticker.Reset(nextInterval)
+				interval = nextInterval
 			}
 		}
 	}
@@ -179,19 +232,29 @@ func (o *Orchestrator) RunOnce(ctx context.Context, issueIdentifier string) erro
 		sortDispatch(eligible)
 		target = &eligible[0]
 	} else {
-		for i := range candidates {
-			if candidates[i].Identifier == issueIdentifier {
-				target = &candidates[i]
+		for i := range eligible {
+			if eligible[i].Identifier == issueIdentifier {
+				target = &eligible[i]
 				break
 			}
 		}
 		if target == nil {
+			for _, r := range rejected {
+				if r.Issue.Identifier == issueIdentifier {
+					return errors.New("issue not eligible: " + issueIdentifier + ": " + r.Reason)
+				}
+			}
 			return errors.New("issue not found among active candidates: " + issueIdentifier)
 		}
 	}
 
 	o.Logger.Info("dispatching one-shot", "issue", target.Identifier)
+	startedAt := time.Now()
 	result := o.Worker.Run(ctx, *target, nil, "")
+	o.recordOneShotResult(result, startedAt)
+	if err := o.writeStatusSnapshot(ctx); err != nil {
+		return errors.New("status snapshot: " + err.Error())
+	}
 	o.Logger.Info("one-shot complete",
 		"issue", target.Identifier,
 		"status", string(result.Status),
@@ -205,10 +268,22 @@ func (o *Orchestrator) RunOnce(ctx context.Context, issueIdentifier string) erro
 	return nil
 }
 
+func (o *Orchestrator) recordOneShotResult(res WorkerResult, startedAt time.Time) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	finishedAt := time.Now().UTC()
+	o.recordRunTelemetryLocked(res, domain.RunningEntry{StartedAt: startedAt}, true)
+	o.recordRunAttemptLocked(res, startedAt, finishedAt)
+	if res.Status == domain.RunStatusSucceeded {
+		o.state.Completed[res.Issue.ID] = struct{}{}
+	}
+}
+
 // tick is one poll iteration. Spec §8.1.
 func (o *Orchestrator) tick(ctx context.Context) error {
 	o.drainWorkerResults()
 	o.reconcile(ctx)
+	o.reloadWorkflowIfChanged()
 
 	if err := o.Config.Validate(); err != nil {
 		o.Logger.Error("preflight validation failed; skipping dispatch", "err", err)
@@ -231,6 +306,75 @@ func (o *Orchestrator) tick(ctx context.Context) error {
 	return nil
 }
 
+func (o *Orchestrator) reloadWorkflowIfChanged() {
+	o.mu.Lock()
+	path := o.workflowPath
+	lastModTime := o.workflowModTime
+	o.mu.Unlock()
+	if path == "" {
+		return
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		o.Logger.Warn("workflow reload stat failed; keeping previous workflow", "path", path, "err", err)
+		return
+	}
+	if !info.ModTime().After(lastModTime) {
+		return
+	}
+
+	def, err := workflow.Load(path)
+	if err != nil {
+		o.Logger.Warn("workflow reload failed; keeping previous workflow", "path", path, "err", err)
+		return
+	}
+	cfg := workflow.NewServiceConfig(def.Config)
+	if err := cfg.Validate(); err != nil {
+		o.Logger.Warn("workflow reload validation failed; keeping previous workflow", "path", path, "err", err)
+		return
+	}
+
+	o.mu.Lock()
+	currentRunner := o.Config.AgentRunnerName()
+	if cfg.AgentRunnerName() != currentRunner {
+		o.workflowModTime = info.ModTime()
+		o.mu.Unlock()
+		o.Logger.Warn("workflow reload skipped runner change; restart orchestrator or use one-shot canary",
+			"path", path,
+			"current_runner", currentRunner,
+			"new_runner", cfg.AgentRunnerName(),
+		)
+		return
+	}
+	o.Workflow = def
+	o.Config = cfg
+	o.state.PollIntervalMs = cfg.Polling.IntervalMs
+	o.state.MaxConcurrentAgents = cfg.Agent.MaxConcurrentAgents
+	o.workflowModTime = info.ModTime()
+	o.mu.Unlock()
+	if updater, ok := o.Worker.(WorkflowUpdater); ok {
+		updater.UpdateWorkflow(def, cfg)
+	}
+	o.Logger.Info("workflow reloaded",
+		"path", path,
+		"poll_interval_ms", cfg.Polling.IntervalMs,
+		"max_concurrent_agents", cfg.Agent.MaxConcurrentAgents,
+		"active_states", cfg.Tracker.ActiveStates,
+	)
+}
+
+func (o *Orchestrator) pollInterval() time.Duration {
+	o.mu.Lock()
+	intervalMs := o.Config.Polling.IntervalMs
+	o.mu.Unlock()
+	interval := time.Duration(intervalMs) * time.Millisecond
+	if interval <= 0 {
+		return 30 * time.Second
+	}
+	return interval
+}
+
 // drainWorkerResults pulls all completed worker results without blocking.
 func (o *Orchestrator) drainWorkerResults() {
 	for {
@@ -246,13 +390,19 @@ func (o *Orchestrator) drainWorkerResults() {
 // handleWorkerResult updates running state and (re)schedules retries
 // per spec §7.3 transition triggers (Worker Exit normal / abnormal).
 func (o *Orchestrator) handleWorkerResult(res WorkerResult) {
+	var escalation *needsHumanEscalation
 	o.mu.Lock()
+	runningEntry, hadRunningEntry := o.state.Running[res.Issue.ID]
 	delete(o.state.Running, res.Issue.ID)
 	delete(o.cancelRunning, res.Issue.ID)
 	_, cleanup := o.cleanupAfterRun[res.Issue.ID]
 	delete(o.cleanupAfterRun, res.Issue.ID)
+	finishedAt := time.Now().UTC()
+	o.recordRunTelemetryLocked(res, runningEntry, hadRunningEntry)
+	o.recordRunAttemptLocked(res, runningEntry.StartedAt, finishedAt)
 	if cleanup {
 		delete(o.state.Claimed, res.Issue.ID)
+		delete(o.state.NeedsHuman, res.Issue.ID)
 		o.mu.Unlock()
 		o.cleanupIssue(context.Background(), res.Issue)
 		return
@@ -262,6 +412,13 @@ func (o *Orchestrator) handleWorkerResult(res WorkerResult) {
 	case domain.RunStatusSucceeded:
 		// Spec §7.1: schedule a short continuation retry to re-check
 		// whether the issue is still active.
+		successes := o.successfulTurnCountLocked(res.Issue, res.Attempt)
+		if o.shouldStopSuccessfulLoopLocked(successes) {
+			o.markNeedsHumanLocked(res.Issue, successes, "successful_continuation_loop")
+			escalation = &needsHumanEscalation{issue: res.Issue, reason: "successful_continuation_loop", attempts: successes}
+			o.mu.Unlock()
+			break
+		}
 		nextAttempt, ok := o.nextAttemptLocked(res.Issue, res.Attempt)
 		if !ok {
 			o.mu.Unlock()
@@ -283,9 +440,141 @@ func (o *Orchestrator) handleWorkerResult(res WorkerResult) {
 		o.mu.Unlock()
 	default:
 		// Canceled / reconciliation-killed: just release the claim.
+		delete(o.state.NeedsHuman, res.Issue.ID)
 		delete(o.state.Claimed, res.Issue.ID)
 		o.mu.Unlock()
 	}
+	if escalation != nil {
+		o.escalateNeedsHuman(context.Background(), *escalation)
+	}
+}
+
+type needsHumanEscalation struct {
+	issue    domain.Issue
+	reason   string
+	attempts int
+}
+
+func (o *Orchestrator) recordRunTelemetryLocked(res WorkerResult, runningEntry domain.RunningEntry, hadRunningEntry bool) {
+	o.state.CodexTotals.InputTokens += res.InputTokens
+	o.state.CodexTotals.OutputTokens += res.OutputTokens
+	o.state.CodexTotals.TotalTokens += res.TotalTokens
+	if res.RateLimits != nil {
+		o.state.CodexRateLimits = res.RateLimits
+	}
+	if hadRunningEntry && !runningEntry.StartedAt.IsZero() {
+		seconds := int64(time.Since(runningEntry.StartedAt).Seconds())
+		if seconds < 0 {
+			seconds = 0
+		}
+		o.state.CodexTotals.SecondsRunning += seconds
+	}
+}
+
+func (o *Orchestrator) recordRunAttemptLocked(res WorkerResult, startedAt, finishedAt time.Time) {
+	o.state.RecentRuns = append(o.state.RecentRuns, domain.RunAttempt{
+		IssueID:         res.Issue.ID,
+		IssueIdentifier: res.Issue.Identifier,
+		Attempt:         res.Attempt,
+		SessionID:       res.SessionID,
+		ThreadID:        res.ThreadID,
+		TurnID:          res.TurnID,
+		StartedAt:       startedAt,
+		FinishedAt:      finishedAt,
+		InputTokens:     res.InputTokens,
+		OutputTokens:    res.OutputTokens,
+		TotalTokens:     res.TotalTokens,
+		RateLimits:      res.RateLimits,
+		Status:          res.Status,
+		Error:           res.Error,
+	})
+	const maxRecentRuns = 20
+	if len(o.state.RecentRuns) > maxRecentRuns {
+		o.state.RecentRuns = o.state.RecentRuns[len(o.state.RecentRuns)-maxRecentRuns:]
+	}
+}
+
+func (o *Orchestrator) escalateNeedsHuman(ctx context.Context, escalation needsHumanEscalation) {
+	escalator, ok := o.Tracker.(NeedsHumanEscalator)
+	if !ok {
+		o.markNeedsHumanEscalationError(escalation.issue.ID, "tracker_does_not_support_needs_human_escalation")
+		o.Logger.Warn("tracker does not support needs-human escalation",
+			"issue", escalation.issue.Identifier,
+			"reason", escalation.reason,
+		)
+		return
+	}
+	if err := escalator.EscalateNeedsHuman(ctx, escalation.issue, escalation.reason, escalation.attempts); err != nil {
+		o.markNeedsHumanEscalationError(escalation.issue.ID, err.Error())
+		o.Logger.Warn("needs-human escalation failed",
+			"issue", escalation.issue.Identifier,
+			"reason", escalation.reason,
+			"err", err,
+		)
+		return
+	}
+	o.markNeedsHumanEscalated(escalation.issue.ID)
+	o.Logger.Info("needs-human escalation posted",
+		"issue", escalation.issue.Identifier,
+		"reason", escalation.reason,
+	)
+}
+
+func (o *Orchestrator) markNeedsHumanEscalated(issueID string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	entry, ok := o.state.NeedsHuman[issueID]
+	if !ok {
+		return
+	}
+	entry.EscalatedAt = time.Now().UTC()
+	entry.EscalationError = ""
+	o.state.NeedsHuman[issueID] = entry
+}
+
+func (o *Orchestrator) markNeedsHumanEscalationError(issueID string, errStr string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	entry, ok := o.state.NeedsHuman[issueID]
+	if !ok {
+		return
+	}
+	entry.EscalationError = errStr
+	o.state.NeedsHuman[issueID] = entry
+}
+
+func (o *Orchestrator) successfulTurnCountLocked(issue domain.Issue, completedAttempt *int) int {
+	if completedAttempt == nil {
+		return 1
+	}
+	return *completedAttempt + 1
+}
+
+func (o *Orchestrator) shouldStopSuccessfulLoopLocked(successes int) bool {
+	max := o.Config.Agent.MaxUnproductiveSuccess
+	return max > 0 && successes >= max
+}
+
+func (o *Orchestrator) markNeedsHumanLocked(issue domain.Issue, attempts int, reason string) {
+	if t, ok := o.retryTimers[issue.ID]; ok {
+		t.Stop()
+		delete(o.retryTimers, issue.ID)
+	}
+	delete(o.state.RetryAttempts, issue.ID)
+	delete(o.readyAttempts, issue.ID)
+	delete(o.readySessions, issue.ID)
+	o.state.NeedsHuman[issue.ID] = domain.NeedsHumanEntry{
+		IssueID:    issue.ID,
+		Identifier: issue.Identifier,
+		Reason:     reason,
+		Attempts:   attempts,
+		Since:      time.Now().UTC(),
+	}
+	o.Logger.Warn("successful continuation loop detected; leaving issue claimed for human review",
+		"issue", issue.Identifier,
+		"attempts", attempts,
+		"reason", reason,
+	)
 }
 
 func (o *Orchestrator) nextAttemptLocked(issue domain.Issue, completedAttempt *int) (int, bool) {
@@ -330,6 +619,13 @@ func (o *Orchestrator) scheduleRetryLocked(issue domain.Issue, attempt int, errS
 func (o *Orchestrator) onRetryFire(issue domain.Issue, attempt int) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if _, needsHuman := o.state.NeedsHuman[issue.ID]; needsHuman {
+		o.Logger.Info("retry timer fired for issue needing human review; keeping claim",
+			"issue", issue.Identifier, "attempt", attempt)
+		delete(o.state.RetryAttempts, issue.ID)
+		delete(o.retryTimers, issue.ID)
+		return
+	}
 	delete(o.state.RetryAttempts, issue.ID)
 	delete(o.retryTimers, issue.ID)
 	delete(o.state.Claimed, issue.ID)
@@ -399,6 +695,10 @@ func (o *Orchestrator) dispatchUpToCapacity(ctx context.Context, sorted []domain
 			o.mu.Unlock()
 			continue
 		}
+		if _, needsHuman := o.state.NeedsHuman[issue.ID]; needsHuman {
+			o.mu.Unlock()
+			continue
+		}
 		if _, claimed := o.state.Claimed[issue.ID]; claimed {
 			o.mu.Unlock()
 			continue
@@ -444,10 +744,11 @@ func (o *Orchestrator) runWorker(ctx context.Context, issue domain.Issue, attemp
 		// down the orchestrator.
 		if r := recover(); r != nil {
 			o.workerDone <- WorkerResult{
-				Issue:   issue,
-				Attempt: attempt,
-				Status:  domain.RunStatusFailed,
-				Error:   "worker panic: " + toString(r),
+				Issue:       issue,
+				Attempt:     attempt,
+				Status:      domain.RunStatusFailed,
+				Error:       "worker panic: " + toString(r),
+				TotalTokens: 0,
 			}
 		}
 	}()

@@ -18,6 +18,12 @@ func TestNewServiceConfig_AppliesDefaults(t *testing.T) {
 	if cfg.Agent.MaxConcurrentAgents != 10 {
 		t.Errorf("Agent.MaxConcurrentAgents default = %d", cfg.Agent.MaxConcurrentAgents)
 	}
+	if cfg.Agent.MaxUnproductiveSuccess != 3 {
+		t.Errorf("Agent.MaxUnproductiveSuccess default = %d", cfg.Agent.MaxUnproductiveSuccess)
+	}
+	if cfg.LinearAccessMode() != "vm_env" {
+		t.Errorf("LinearAccessMode default = %q", cfg.LinearAccessMode())
+	}
 	if cfg.Hooks.TimeoutMs != 60000 {
 		t.Errorf("Hooks.TimeoutMs default = %d", cfg.Hooks.TimeoutMs)
 	}
@@ -46,7 +52,16 @@ func TestNewServiceConfig_OverridesFromFrontMatter(t *testing.T) {
 			"base_image": "spur-base",
 		},
 		"agent": map[string]any{
-			"max_concurrent_agents": 2,
+			"max_concurrent_agents":      2,
+			"max_unproductive_successes": 2,
+			"runner":                     "codex",
+		},
+		"credentials": map[string]any{
+			"linear_access": "vm_env",
+		},
+		"codex": map[string]any{
+			"command":         "codex app-server --json",
+			"turn_timeout_ms": 1234,
 		},
 	}
 	cfg := NewServiceConfig(raw)
@@ -71,6 +86,21 @@ func TestNewServiceConfig_OverridesFromFrontMatter(t *testing.T) {
 	}
 	if cfg.Agent.MaxConcurrentAgents != 2 {
 		t.Errorf("Agent.MaxConcurrentAgents = %d", cfg.Agent.MaxConcurrentAgents)
+	}
+	if cfg.Agent.MaxUnproductiveSuccess != 2 {
+		t.Errorf("Agent.MaxUnproductiveSuccess = %d", cfg.Agent.MaxUnproductiveSuccess)
+	}
+	if cfg.AgentRunnerName() != "codex" {
+		t.Errorf("AgentRunnerName = %q, want codex", cfg.AgentRunnerName())
+	}
+	if cfg.AgentCommand() != "codex app-server --json" {
+		t.Errorf("AgentCommand = %q", cfg.AgentCommand())
+	}
+	if cfg.AgentTurnTimeoutMs() != 1234 {
+		t.Errorf("AgentTurnTimeoutMs = %d", cfg.AgentTurnTimeoutMs())
+	}
+	if cfg.LinearAccessMode() != "vm_env" {
+		t.Errorf("LinearAccessMode = %q", cfg.LinearAccessMode())
 	}
 }
 
@@ -110,6 +140,51 @@ func TestServiceConfig_Validate(t *testing.T) {
 				ClaudeCode: ClaudeCodeConfig{Command: "claude --print"},
 			},
 			want: nil,
+		},
+		{
+			name: "valid codex",
+			cfg: ServiceConfig{
+				Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
+				Agent:   AgentConfig{Runner: "codex"},
+				Codex:   CodexConfig{Command: "codex app-server"},
+			},
+			want: nil,
+		},
+		{
+			name: "unsupported runner",
+			cfg: ServiceConfig{
+				Tracker: TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
+				Agent:   AgentConfig{Runner: "other"},
+			},
+			want: ErrUnsupportedRunner,
+		},
+		{
+			name: "host proxy requires codex",
+			cfg: ServiceConfig{
+				Tracker:     TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
+				ClaudeCode:  ClaudeCodeConfig{Command: "claude --print"},
+				Credentials: CredentialsConfig{LinearAccess: "host_proxy"},
+			},
+			want: ErrUnsupportedLinearAccess,
+		},
+		{
+			name: "host proxy valid with codex",
+			cfg: ServiceConfig{
+				Tracker:     TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
+				Agent:       AgentConfig{Runner: "codex"},
+				Codex:       CodexConfig{Command: "codex app-server"},
+				Credentials: CredentialsConfig{LinearAccess: "host_proxy"},
+			},
+			want: nil,
+		},
+		{
+			name: "unknown linear access mode",
+			cfg: ServiceConfig{
+				Tracker:     TrackerConfig{Kind: "linear", ProjectSlug: "spur"},
+				ClaudeCode:  ClaudeCodeConfig{Command: "claude --print"},
+				Credentials: CredentialsConfig{LinearAccess: "direct"},
+			},
+			want: ErrUnsupportedLinearAccess,
 		},
 	}
 	for _, tc := range cases {

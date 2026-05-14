@@ -6,31 +6,35 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"time"
 
-	"github.com/sasilver75/events/orchestrator/internal/agent/claudecode"
+	"github.com/sasilver75/events/orchestrator/internal/agent"
 	"github.com/sasilver75/events/orchestrator/internal/domain"
 	"github.com/sasilver75/events/orchestrator/internal/workflow"
 	"github.com/sasilver75/events/orchestrator/internal/workspace/tart"
 )
 
 // SpurWorker is the concrete Worker that ties the Tart Workspace Manager,
-// WORKFLOW.md hooks, and Claude Code Agent Runner together for one issue.
+// WORKFLOW.md hooks, and configured Agent Runner together for one issue.
 //
 // Lifecycle (one Run call):
 //  1. EnsureWorkspace — clone-or-boot the per-issue VM.
 //  2. RunHook(after_create) iff Workspace.CreatedNow.
 //  3. RunHook(before_run).
 //  4. Render the WORKFLOW.md prompt with this issue.
-//  5. AgentRunner.Run(prompt) — Claude Code inside the VM.
+//  5. AgentRunner.Run(prompt) — the selected coding agent inside the VM.
 //  6. RunHook(after_run).
 //  7. Return result; orchestrator decides whether to clean up.
 type SpurWorker struct {
+	mu sync.RWMutex
+
 	Workflow *workflow.Definition
 	Config   workflow.ServiceConfig
 
 	WorkspaceMgr *tart.Manager
-	AgentRunner  *claudecode.Runner
+	AgentRunner  agent.ConfigurableRunner
+	DynamicTools []agent.DynamicTool
 
 	// HarnessCreds holds the per-VM credential bundle that the
 	// before_run hook injects. Read once at orchestrator startup from
@@ -50,12 +54,14 @@ type Credentials struct {
 	GitHubToken      string
 	LinearToken      string
 	ClaudeHarnessDir string // host path to the harness identity's ~/.claude/ snapshot
+	CodexHarnessDir  string // optional host path to a filtered ~/.codex/ snapshot
 }
 
 // Run executes one full ticket lifecycle and returns a WorkerResult.
 // Errors are captured in the result, not returned, so the orchestrator
 // can always integrate the outcome into its state machine.
 func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, resumeSessionID string) WorkerResult {
+	def, cfg := w.workflowSnapshot()
 	logger := w.Logger.With("issue", issue.Identifier)
 	logger.Info("worker starting", "title", issue.Title, "state", issue.State)
 
@@ -70,6 +76,11 @@ func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, 
 
 	issueJSON, _ := json.Marshal(issue) // best-effort; rendering errors are non-fatal here
 
+	linearToken := w.HarnessCreds.LinearToken
+	if cfg.LinearAccessMode() == "host_proxy" {
+		linearToken = ""
+	}
+
 	hookEnv := tart.HookEnv{
 		VMName:           workspace.Path,
 		VMIP:             vmIP,
@@ -77,50 +88,45 @@ func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, 
 		IssueIdentifier:  issue.Identifier,
 		IssueJSON:        string(issueJSON),
 		GitHubToken:      w.HarnessCreds.GitHubToken,
-		LinearToken:      w.HarnessCreds.LinearToken,
+		LinearToken:      linearToken,
 		RunLogDir:        runLogDir,
 		SSHKey:           w.WorkspaceMgr.SSHKey,
 		HarnessClaudeDir: w.HarnessCreds.ClaudeHarnessDir,
+		HarnessCodexDir:  w.HarnessCreds.CodexHarnessDir,
 	}
 
 	// 2. after_create (only on first creation).
-	hookTimeout := time.Duration(w.Config.Hooks.TimeoutMs) * time.Millisecond
-	if workspace.CreatedNow && w.Config.Hooks.AfterCreate != "" {
+	hookTimeout := time.Duration(cfg.Hooks.TimeoutMs) * time.Millisecond
+	if workspace.CreatedNow && cfg.Hooks.AfterCreate != "" {
 		logger.Info("running after_create hook")
-		if out, err := tart.RunHook(ctx, "after_create", w.Config.Hooks.AfterCreate, hookEnv, hookTimeout); err != nil {
+		if out, err := tart.RunHook(ctx, "after_create", cfg.Hooks.AfterCreate, hookEnv, hookTimeout); err != nil {
 			logger.Error("after_create hook failed", "err", err, "out", trim(string(out), 400))
 			return WorkerResult{Issue: issue, Status: domain.RunStatusFailed, Error: "after_create: " + err.Error()}
 		}
 	}
 
 	// 3. before_run.
-	if w.Config.Hooks.BeforeRun != "" {
+	if cfg.Hooks.BeforeRun != "" {
 		logger.Info("running before_run hook")
-		if out, err := tart.RunHook(ctx, "before_run", w.Config.Hooks.BeforeRun, hookEnv, hookTimeout); err != nil {
+		if out, err := tart.RunHook(ctx, "before_run", cfg.Hooks.BeforeRun, hookEnv, hookTimeout); err != nil {
 			logger.Error("before_run hook failed", "err", err, "out", trim(string(out), 400))
 			return WorkerResult{Issue: issue, Status: domain.RunStatusFailed, Error: "before_run: " + err.Error()}
 		}
 	}
 
 	// 4. Render prompt.
-	prompt, err := workflow.Render(w.Workflow.PromptTemplate, issue, attempt)
+	prompt, err := workflow.Render(def.PromptTemplate, issue, attempt)
 	if err != nil {
 		return WorkerResult{Issue: issue, Status: domain.RunStatusFailed, Error: "prompt_render: " + err.Error()}
 	}
 
 	// 5. Agent.
-	// Inject per-run secrets directly into the claude subprocess env, so
-	// `gh pr create` and any Linear API calls work without the agent
-	// needing to source a file.
-	w.AgentRunner.Env = map[string]string{
-		"GITHUB_TOKEN":   w.HarnessCreds.GitHubToken,
-		"LINEAR_API_KEY": w.HarnessCreds.LinearToken,
-	}
+	agentRunner := w.AgentRunner.WithTurnConfig(w.agentTurnConfig(cfg))
 	logger.Info("launching agent")
-	agentResult, runErr := w.AgentRunner.Run(ctx, vmIP, prompt, resumeSessionID, func(ev claudecode.Event) {
+	agentResult, runErr := agentRunner.Run(ctx, vmIP, prompt, resumeSessionID, func(ev agent.Event) {
 		// Lightweight live logging; high-volume fan-out goes to a log
 		// sink in a real deployment.
-		if ev.Type == claudecode.EventSessionStarted {
+		if ev.Type == agent.EventSessionStarted {
 			logger.Info("agent session started", "session_id", ev.SessionID)
 		}
 	})
@@ -130,24 +136,32 @@ func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, 
 	logger.Info("agent finished",
 		"event", string(agentResult.Type),
 		"session_id", agentResult.SessionID,
+		"thread_id", agentResult.ThreadID,
+		"turn_id", agentResult.TurnID,
 		"duration", agentResult.Duration,
 		"tokens", agentResult.Usage.TotalTokens,
+		"rate_limit", agentResult.RateLimits,
 	)
 
 	// 6. after_run (always, regardless of outcome).
-	if w.Config.Hooks.AfterRun != "" {
-		if out, err := tart.RunHook(ctx, "after_run", w.Config.Hooks.AfterRun, hookEnv, hookTimeout); err != nil {
+	if cfg.Hooks.AfterRun != "" {
+		if out, err := tart.RunHook(ctx, "after_run", cfg.Hooks.AfterRun, hookEnv, hookTimeout); err != nil {
 			logger.Warn("after_run hook failed (continuing)", "err", err, "out", trim(string(out), 400))
 		}
 	}
 
 	// 7. Map agent event → domain.RunStatus for orchestrator.
 	return WorkerResult{
-		Issue:     issue,
-		Status:    mapAgentEventToStatus(agentResult.Type),
-		Error:     agentResult.Error,
-		SessionID: agentResult.SessionID,
-		Tokens:    agentResult.Usage.TotalTokens,
+		Issue:        issue,
+		Status:       mapAgentEventToStatus(agentResult.Type),
+		Error:        agentResult.Error,
+		SessionID:    agentResult.SessionID,
+		ThreadID:     agentResult.ThreadID,
+		TurnID:       agentResult.TurnID,
+		InputTokens:  agentResult.Usage.InputTokens,
+		OutputTokens: agentResult.Usage.OutputTokens,
+		TotalTokens:  agentResult.Usage.TotalTokens,
+		RateLimits:   agentResult.RateLimits,
 	}
 }
 
@@ -155,6 +169,7 @@ func (w *SpurWorker) Run(ctx context.Context, issue domain.Issue, attempt *int, 
 // existing VM if needed so before_remove can collect artifacts, then stops and
 // deletes the Tart workspace.
 func (w *SpurWorker) Cleanup(ctx context.Context, issue domain.Issue) error {
+	_, cfg := w.workflowSnapshot()
 	vmName := tart.VMNameFor(issue.Identifier)
 	exists, err := w.WorkspaceMgr.Exists(ctx, vmName)
 	if err != nil {
@@ -170,6 +185,10 @@ func (w *SpurWorker) Cleanup(ctx context.Context, issue domain.Issue) error {
 	}
 
 	issueJSON, _ := json.Marshal(issue)
+	linearToken := w.HarnessCreds.LinearToken
+	if cfg.LinearAccessMode() == "host_proxy" {
+		linearToken = ""
+	}
 	hookEnv := tart.HookEnv{
 		VMName:           workspace.Path,
 		VMIP:             vmIP,
@@ -177,15 +196,16 @@ func (w *SpurWorker) Cleanup(ctx context.Context, issue domain.Issue) error {
 		IssueIdentifier:  issue.Identifier,
 		IssueJSON:        string(issueJSON),
 		GitHubToken:      w.HarnessCreds.GitHubToken,
-		LinearToken:      w.HarnessCreds.LinearToken,
+		LinearToken:      linearToken,
 		RunLogDir:        w.runLogDirFor(issue, nil),
 		SSHKey:           w.WorkspaceMgr.SSHKey,
 		HarnessClaudeDir: w.HarnessCreds.ClaudeHarnessDir,
+		HarnessCodexDir:  w.HarnessCreds.CodexHarnessDir,
 	}
 
-	hookTimeout := time.Duration(w.Config.Hooks.TimeoutMs) * time.Millisecond
-	if w.Config.Hooks.BeforeRemove != "" {
-		if out, err := tart.RunHook(ctx, "before_remove", w.Config.Hooks.BeforeRemove, hookEnv, hookTimeout); err != nil {
+	hookTimeout := time.Duration(cfg.Hooks.TimeoutMs) * time.Millisecond
+	if cfg.Hooks.BeforeRemove != "" {
+		if out, err := tart.RunHook(ctx, "before_remove", cfg.Hooks.BeforeRemove, hookEnv, hookTimeout); err != nil {
 			w.Logger.Warn("before_remove hook failed (continuing with VM delete)",
 				"issue", issue.Identifier, "err", err, "out", trim(string(out), 400))
 		}
@@ -193,19 +213,54 @@ func (w *SpurWorker) Cleanup(ctx context.Context, issue domain.Issue) error {
 	return w.WorkspaceMgr.RemoveWorkspace(ctx, workspace.Path)
 }
 
-func mapAgentEventToStatus(t claudecode.EventType) domain.RunStatus {
+func (w *SpurWorker) UpdateWorkflow(def *workflow.Definition, cfg workflow.ServiceConfig) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.Workflow = def
+	w.Config = cfg
+}
+
+func (w *SpurWorker) workflowSnapshot() (*workflow.Definition, workflow.ServiceConfig) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.Workflow, w.Config
+}
+
+func (w *SpurWorker) agentTurnConfig(cfg workflow.ServiceConfig) agent.TurnConfig {
+	// Inject per-run secrets directly into the agent subprocess env. In
+	// host_proxy mode the Linear token stays on the host and Codex receives a
+	// dynamic tool instead.
+	env := map[string]string{
+		"GITHUB_TOKEN": w.HarnessCreds.GitHubToken,
+	}
+	var dynamicTools []agent.DynamicTool
+	if cfg.LinearAccessMode() == "host_proxy" {
+		dynamicTools = append(dynamicTools, w.DynamicTools...)
+	} else {
+		env["LINEAR_API_KEY"] = w.HarnessCreds.LinearToken
+	}
+	return agent.TurnConfig{
+		Command:      cfg.AgentCommand(),
+		TurnTimeout:  time.Duration(cfg.AgentTurnTimeoutMs()) * time.Millisecond,
+		StallTimeout: time.Duration(cfg.AgentStallTimeoutMs()) * time.Millisecond,
+		Env:          env,
+		DynamicTools: dynamicTools,
+	}
+}
+
+func mapAgentEventToStatus(t agent.EventType) domain.RunStatus {
 	switch t {
-	case claudecode.EventTurnCompleted:
+	case agent.EventTurnCompleted:
 		return domain.RunStatusSucceeded
-	case claudecode.EventTurnFailed:
+	case agent.EventTurnFailed:
 		return domain.RunStatusFailed
-	case claudecode.EventTurnCancelled:
+	case agent.EventTurnCancelled:
 		return domain.RunStatusCanceledByReconciliation
-	case claudecode.EventTurnTimedOut:
+	case agent.EventTurnTimedOut:
 		return domain.RunStatusTimedOut
-	case claudecode.EventTurnStalled:
+	case agent.EventTurnStalled:
 		return domain.RunStatusStalled
-	case claudecode.EventStartupFailed:
+	case agent.EventStartupFailed:
 		return domain.RunStatusFailed
 	default:
 		return domain.RunStatusFailed

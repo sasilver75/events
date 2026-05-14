@@ -40,14 +40,16 @@ func TestNew_Defaults(t *testing.T) {
 func TestHookEnv_Env(t *testing.T) {
 	t.Parallel()
 	env := HookEnv{
-		VMName:          "spur-ticket-SAM-12",
-		VMIP:            "192.168.64.5",
-		IssueID:         "uuid-1",
-		IssueIdentifier: "SAM-12",
-		IssueJSON:       `{"id":"uuid-1"}`,
-		GitHubToken:     "ghp_xxx",
-		LinearToken:     "lin_xxx",
-		RunLogDir:       "/var/log/spur/SAM-12-1",
+		VMName:           "spur-ticket-SAM-12",
+		VMIP:             "192.168.64.5",
+		IssueID:          "uuid-1",
+		IssueIdentifier:  "SAM-12",
+		IssueJSON:        `{"id":"uuid-1"}`,
+		GitHubToken:      "ghp_xxx",
+		LinearToken:      "lin_xxx",
+		RunLogDir:        "/var/log/spur/SAM-12-1",
+		HarnessClaudeDir: "/tmp/claude",
+		HarnessCodexDir:  "/tmp/codex",
 	}
 	got := env.Env()
 	wantKeys := []string{
@@ -59,6 +61,8 @@ func TestHookEnv_Env(t *testing.T) {
 		"SPUR_GITHUB_TOKEN=ghp_xxx",
 		"SPUR_LINEAR_TOKEN=lin_xxx",
 		"SPUR_RUN_LOG_DIR=/var/log/spur/SAM-12-1",
+		"SPUR_HARNESS_CLAUDE_DIR=/tmp/claude",
+		"SPUR_HARNESS_CODEX_DIR=/tmp/codex",
 	}
 	for _, want := range wantKeys {
 		found := false

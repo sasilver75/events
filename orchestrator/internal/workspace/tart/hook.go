@@ -24,6 +24,7 @@ type HookEnv struct {
 	RunLogDir        string
 	SSHKey           string // host path to harness private SSH key
 	HarnessClaudeDir string // host path to ~/.spur/claude-harness/ snapshot
+	HarnessCodexDir  string // optional host path to ~/.spur/codex-harness/ snapshot
 }
 
 // Env converts HookEnv to a slice of "KEY=value" env entries for exec.Cmd.
@@ -39,6 +40,7 @@ func (h HookEnv) Env() []string {
 		"SPUR_RUN_LOG_DIR=" + h.RunLogDir,
 		"SPUR_SSH_KEY=" + h.SSHKey,
 		"SPUR_HARNESS_CLAUDE_DIR=" + h.HarnessClaudeDir,
+		"SPUR_HARNESS_CODEX_DIR=" + h.HarnessCodexDir,
 	}
 }
 

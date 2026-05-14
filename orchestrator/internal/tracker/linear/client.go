@@ -6,9 +6,9 @@
 //  2. FetchIssuesByStates  — used for startup terminal cleanup.
 //  3. FetchIssueStatesByIDs — used for active-run reconciliation.
 //
-// The adapter is a tracker reader, never a writer (spec §11.5). Ticket
-// mutations (state transitions, comments) flow through the agent itself
-// during a run, not through the orchestrator.
+// The adapter is primarily a tracker reader (spec §11.5). The one narrow
+// writer path is host-side escalation to Needs Human after the orchestrator
+// detects an unproductive continuation loop.
 package linear
 
 import (
@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/sasilver75/events/orchestrator/internal/agent"
 	"github.com/sasilver75/events/orchestrator/internal/domain"
 )
 
@@ -34,6 +35,8 @@ var (
 	ErrLinearGraphQLErrors    = errors.New("linear_graphql_errors")
 	ErrLinearUnknownPayload   = errors.New("linear_unknown_payload")
 	ErrLinearMissingEndCursor = errors.New("linear_missing_end_cursor")
+	ErrLinearMissingState     = errors.New("linear_missing_workflow_state")
+	ErrLinearMutationFailed   = errors.New("linear_mutation_failed")
 )
 
 // defaultPageSize per spec §11.2 ("Page size default: 50").
@@ -180,6 +183,131 @@ func (c *Client) FetchIssuesByStates(ctx context.Context, states []string) ([]do
 		out = append(out, r.normalize())
 	}
 	return out, nil
+}
+
+func (c *Client) EscalateNeedsHuman(ctx context.Context, issue domain.Issue, reason string, attempts int) error {
+	stateID, err := c.workflowStateID(ctx, issue.ID, "Needs Human")
+	if err != nil {
+		return err
+	}
+	body := needsHumanEscalationComment(issue, reason, attempts)
+	if err := c.createComment(ctx, issue.ID, body); err != nil {
+		return err
+	}
+	if err := c.updateIssueState(ctx, issue.ID, stateID); err != nil {
+		return err
+	}
+	return nil
+}
+
+// DynamicTool exposes Linear GraphQL through Codex app-server without copying
+// the Linear API token into the issue VM. It is intentionally host-side: Codex
+// sends an item/tool/call request, and the orchestrator performs the GraphQL
+// request with its own credentials.
+func (c *Client) DynamicTool() agent.DynamicTool {
+	return agent.DynamicTool{
+		Name:        "linear_graphql",
+		Description: "Run a Linear GraphQL operation through the orchestrator-held Linear credential. Arguments: {\"query\": string, \"variables\": object}. Returns the Linear GraphQL data JSON.",
+		InputSchema: json.RawMessage(`{"type":"object","required":["query"],"properties":{"query":{"type":"string"},"variables":{"type":"object"}},"additionalProperties":false}`),
+		Handle:      c.handleDynamicToolCall,
+	}
+}
+
+func (c *Client) handleDynamicToolCall(ctx context.Context, call agent.DynamicToolCall) (agent.DynamicToolResult, error) {
+	var args struct {
+		Query     string         `json:"query"`
+		Variables map[string]any `json:"variables"`
+	}
+	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+		return agent.DynamicToolResult{Success: false, Text: "invalid linear_graphql arguments: " + err.Error()}, nil
+	}
+	if args.Query == "" {
+		return agent.DynamicToolResult{Success: false, Text: "linear_graphql query is required"}, nil
+	}
+	var data json.RawMessage
+	if err := c.do(ctx, args.Query, args.Variables, &data); err != nil {
+		return agent.DynamicToolResult{Success: false, Text: err.Error()}, nil
+	}
+	return agent.DynamicToolResult{Success: true, Text: string(data)}, nil
+}
+
+func (c *Client) workflowStateID(ctx context.Context, issueID string, stateName string) (string, error) {
+	var issueResp struct {
+		Issue *struct {
+			ID   string `json:"id"`
+			Team *struct {
+				ID string `json:"id"`
+			} `json:"team"`
+		} `json:"issue"`
+	}
+	if err := c.do(ctx, queryIssueTeamByID, map[string]any{"issueID": issueID}, &issueResp); err != nil {
+		return "", err
+	}
+	if issueResp.Issue == nil || issueResp.Issue.Team == nil || issueResp.Issue.Team.ID == "" {
+		return "", fmt.Errorf("%w: issue %s has no team", ErrLinearUnknownPayload, issueID)
+	}
+
+	var stateResp struct {
+		WorkflowStates struct {
+			Nodes []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"nodes"`
+		} `json:"workflowStates"`
+	}
+	vars := map[string]any{"teamID": issueResp.Issue.Team.ID, "stateName": stateName}
+	if err := c.do(ctx, queryWorkflowStateByName, vars, &stateResp); err != nil {
+		return "", err
+	}
+	for _, state := range stateResp.WorkflowStates.Nodes {
+		if state.Name == stateName && state.ID != "" {
+			return state.ID, nil
+		}
+	}
+	return "", fmt.Errorf("%w: %q for issue %s", ErrLinearMissingState, stateName, issueID)
+}
+
+func (c *Client) createComment(ctx context.Context, issueID string, body string) error {
+	var resp struct {
+		CommentCreate struct {
+			Success bool `json:"success"`
+		} `json:"commentCreate"`
+	}
+	vars := map[string]any{"issueID": issueID, "body": body}
+	if err := c.do(ctx, mutationCommentCreate, vars, &resp); err != nil {
+		return err
+	}
+	if !resp.CommentCreate.Success {
+		return fmt.Errorf("%w: commentCreate returned success=false for %s", ErrLinearMutationFailed, issueID)
+	}
+	return nil
+}
+
+func (c *Client) updateIssueState(ctx context.Context, issueID string, stateID string) error {
+	var resp struct {
+		IssueUpdate struct {
+			Success bool `json:"success"`
+		} `json:"issueUpdate"`
+	}
+	vars := map[string]any{"issueID": issueID, "stateID": stateID}
+	if err := c.do(ctx, mutationIssueUpdateState, vars, &resp); err != nil {
+		return err
+	}
+	if !resp.IssueUpdate.Success {
+		return fmt.Errorf("%w: issueUpdate returned success=false for %s", ErrLinearMutationFailed, issueID)
+	}
+	return nil
+}
+
+func needsHumanEscalationComment(issue domain.Issue, reason string, attempts int) string {
+	return fmt.Sprintf(`> _Escalation from spur-orchestrator._
+
+The orchestrator stopped automatic continuation for %s.
+
+**Reason:** %s
+**Successful active turns:** %d
+
+The agent repeatedly returned success while the issue remained active. Inspect for a missing closeout comment, PR link, or state transition to In Review.`, issue.Identifier, reason, attempts)
 }
 
 // graphqlError is one entry in the top-level GraphQL `errors` array.

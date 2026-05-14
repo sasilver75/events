@@ -91,3 +91,47 @@ query TerminalIssues($projectSlug: String!, $states: [String!]!, $first: Int!) {
   }
 }
 `
+
+const queryIssueTeamByID = `
+query IssueTeamByID($issueID: String!) {
+  issue(id: $issueID) {
+    id
+    team { id }
+  }
+}
+`
+
+const queryWorkflowStateByName = `
+query WorkflowStateByName($teamID: String!, $stateName: String!) {
+  workflowStates(
+    filter: {
+      team: { id: { eq: $teamID } }
+      name: { eq: $stateName }
+    }
+    first: 10
+  ) {
+    nodes {
+      id
+      name
+    }
+  }
+}
+`
+
+const mutationIssueUpdateState = `
+mutation IssueUpdateState($issueID: String!, $stateID: String!) {
+  issueUpdate(id: $issueID, input: { stateId: $stateID }) {
+    success
+    issue { id state { name } }
+  }
+}
+`
+
+const mutationCommentCreate = `
+mutation CommentCreate($issueID: String!, $body: String!) {
+  commentCreate(input: { issueId: $issueID, body: $body }) {
+    success
+    comment { id }
+  }
+}
+`

@@ -11,8 +11,16 @@ type RunAttempt struct {
 	// Spec §4.1.5: "null for first run, >=1 for retries/continuation".
 	Attempt *int
 
+	SessionID     string
+	ThreadID      string
+	TurnID        string
 	WorkspacePath string
 	StartedAt     time.Time
+	FinishedAt    time.Time
+	InputTokens   int
+	OutputTokens  int
+	TotalTokens   int
+	RateLimits    any
 	Status        RunStatus
 	Error         string
 }
@@ -38,7 +46,9 @@ const (
 // LiveSession holds the state tracked while a coding-agent subprocess is
 // running. Symphony spec §4.1.6.
 type LiveSession struct {
-	// SessionID is composed as "<ThreadID>-<TurnID>" per spec §4.2.
+	// SessionID is the resumable handle returned by the concrete runner. For
+	// Codex app-server this is currently the thread ID; ThreadID and TurnID are
+	// tracked separately for status/provenance.
 	SessionID string
 	ThreadID  string
 	TurnID    string
@@ -95,6 +105,8 @@ type OrchestratorRuntimeState struct {
 	Claimed       map[string]struct{}     // issue IDs reserved/running/retrying
 	RetryAttempts map[string]RetryEntry   // issue_id -> RetryEntry
 	Completed     map[string]struct{}     // bookkeeping; not used for dispatch gating
+	NeedsHuman    map[string]NeedsHumanEntry
+	RecentRuns    []RunAttempt
 
 	CodexTotals     CodexTotals
 	CodexRateLimits any // latest rate-limit snapshot from agent events
@@ -116,4 +128,16 @@ type CodexTotals struct {
 	OutputTokens   int
 	TotalTokens    int
 	SecondsRunning int64
+}
+
+// NeedsHumanEntry records an issue the orchestrator intentionally stopped
+// dispatching because automatic continuation is no longer productive.
+type NeedsHumanEntry struct {
+	IssueID         string
+	Identifier      string
+	Reason          string
+	Attempts        int
+	Since           time.Time
+	EscalatedAt     time.Time
+	EscalationError string
 }

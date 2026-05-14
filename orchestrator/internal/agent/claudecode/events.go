@@ -28,44 +28,26 @@ package claudecode
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/sasilver75/events/orchestrator/internal/agent"
 )
 
-// EventType matches Symphony spec §10.4's "Important emitted events".
-type EventType string
+type EventType = agent.EventType
 
 const (
-	EventSessionStarted EventType = "session_started"
-	EventStartupFailed  EventType = "startup_failed"
-	EventTurnCompleted  EventType = "turn_completed"
-	EventTurnFailed     EventType = "turn_failed"
-	EventTurnCancelled  EventType = "turn_cancelled"
-	EventTurnTimedOut   EventType = "turn_timed_out"
-	EventTurnStalled    EventType = "turn_stalled"
-	EventOtherMessage   EventType = "other_message"
-	EventMalformed      EventType = "malformed"
+	EventSessionStarted = agent.EventSessionStarted
+	EventStartupFailed  = agent.EventStartupFailed
+	EventTurnCompleted  = agent.EventTurnCompleted
+	EventTurnFailed     = agent.EventTurnFailed
+	EventTurnCancelled  = agent.EventTurnCancelled
+	EventTurnTimedOut   = agent.EventTurnTimedOut
+	EventTurnStalled    = agent.EventTurnStalled
+	EventOtherMessage   = agent.EventOtherMessage
+	EventMalformed      = agent.EventMalformed
 )
 
-// Event is the normalized form the orchestrator consumes. Symphony §10.4.
-type Event struct {
-	Type      EventType
-	Timestamp time.Time
-	SessionID string // populated on session_started + subsequent events
-	ThreadID  string // alias for SessionID in Claude Code's vocabulary
-	TurnID    string // Claude Code calls these "request IDs"
-	Raw       json.RawMessage
-	Usage     Usage // optional; non-zero when the event carried token counts
-	Error     string
-}
-
-// Usage captures per-event token counters. Claude Code emits usage on the
-// `result` event and inside assistant message events. Symphony §13.5 says
-// we should prefer absolute thread totals over deltas — that's what
-// Claude Code's `result.usage` provides.
-type Usage struct {
-	InputTokens  int
-	OutputTokens int
-	TotalTokens  int
-}
+type Event = agent.Event
+type Usage = agent.Usage
 
 // rawClaudeEvent is the wire shape of one JSONL line from Claude Code's
 // stream-json output. Fields not we touch are deliberately omitted; the

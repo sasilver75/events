@@ -2,11 +2,16 @@ package linear
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/sasilver75/events/orchestrator/internal/agent"
+	"github.com/sasilver75/events/orchestrator/internal/domain"
 )
 
 func TestNew_RequiresAPIKey(t *testing.T) {
@@ -174,4 +179,147 @@ func TestFetchIssueStatesByIDs(t *testing.T) {
 	if _, present := out["uuid-3"]; present {
 		t.Errorf("uuid-3 should be absent (Linear didn't return it)")
 	}
+}
+
+func TestEscalateNeedsHuman(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	queries := []string{}
+	varsSeen := []map[string]any{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		mu.Lock()
+		queries = append(queries, req.Query)
+		varsSeen = append(varsSeen, req.Variables)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(req.Query, "IssueTeamByID"):
+			_, _ = w.Write([]byte(`{"data":{"issue":{"id":"uuid-1","team":{"id":"team-1"}}}}`))
+		case strings.Contains(req.Query, "WorkflowStateByName"):
+			_, _ = w.Write([]byte(`{"data":{"workflowStates":{"nodes":[{"id":"state-needs-human","name":"Needs Human"}]}}}`))
+		case strings.Contains(req.Query, "CommentCreate"):
+			_, _ = w.Write([]byte(`{"data":{"commentCreate":{"success":true,"comment":{"id":"comment-1"}}}}`))
+		case strings.Contains(req.Query, "IssueUpdateState"):
+			_, _ = w.Write([]byte(`{"data":{"issueUpdate":{"success":true,"issue":{"id":"uuid-1","state":{"name":"Needs Human"}}}}}`))
+		default:
+			t.Fatalf("unexpected query: %s", req.Query)
+		}
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{Endpoint: srv.URL, APIKey: "lin_api_test", ProjectSlug: "spur"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = c.EscalateNeedsHuman(context.Background(), testIssue(), "successful_continuation_loop", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(queries) != 4 {
+		t.Fatalf("query count = %d, want 4", len(queries))
+	}
+	if got := varsSeen[1]["stateName"]; got != "Needs Human" {
+		t.Fatalf("stateName = %v, want Needs Human", got)
+	}
+	body, _ := varsSeen[2]["body"].(string)
+	if !strings.Contains(body, "successful_continuation_loop") || !strings.Contains(body, "Successful active turns:** 3") {
+		t.Fatalf("comment body missing escalation details: %s", body)
+	}
+	if got := varsSeen[3]["stateID"]; got != "state-needs-human" {
+		t.Fatalf("stateID = %v, want state-needs-human", got)
+	}
+}
+
+func TestEscalateNeedsHuman_MissingState(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query string `json:"query"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(req.Query, "IssueTeamByID"):
+			_, _ = w.Write([]byte(`{"data":{"issue":{"id":"uuid-1","team":{"id":"team-1"}}}}`))
+		case strings.Contains(req.Query, "WorkflowStateByName"):
+			_, _ = w.Write([]byte(`{"data":{"workflowStates":{"nodes":[]}}}`))
+		default:
+			t.Fatalf("unexpected query: %s", req.Query)
+		}
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{Endpoint: srv.URL, APIKey: "lin_api_test", ProjectSlug: "spur"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = c.EscalateNeedsHuman(context.Background(), testIssue(), "successful_continuation_loop", 3)
+	if !errors.Is(err, ErrLinearMissingState) {
+		t.Fatalf("err = %v, want ErrLinearMissingState", err)
+	}
+}
+
+func TestDynamicToolRunsGraphQLWithHostCredential(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "lin_api_test" {
+			t.Fatalf("Authorization header = %q", r.Header.Get("Authorization"))
+		}
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Query != "query Issue($id: String!) { issue(id: $id) { identifier } }" {
+			t.Fatalf("query = %q", req.Query)
+		}
+		if req.Variables["id"] != "uuid-1" {
+			t.Fatalf("variables = %+v", req.Variables)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"issue":{"identifier":"SAM-1"}}}`))
+	}))
+	defer srv.Close()
+
+	c, err := New(Config{Endpoint: srv.URL, APIKey: "lin_api_test", ProjectSlug: "spur"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := c.DynamicTool()
+	if tool.Name != "linear_graphql" || len(tool.InputSchema) == 0 || tool.Handle == nil {
+		t.Fatalf("tool = %+v", tool)
+	}
+	result, err := tool.Handle(context.Background(), agent.DynamicToolCall{
+		Arguments: json.RawMessage(`{
+			"query":"query Issue($id: String!) { issue(id: $id) { identifier } }",
+			"variables":{"id":"uuid-1"}
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("tool handle: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.Text != `{"issue":{"identifier":"SAM-1"}}` {
+		t.Fatalf("result text = %s", result.Text)
+	}
+}
+
+func testIssue() domain.Issue {
+	return domain.Issue{ID: "uuid-1", Identifier: "SAM-1"}
 }
