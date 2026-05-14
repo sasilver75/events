@@ -674,6 +674,50 @@ func TestHandleWorkerResult_AccumulatesTelemetry(t *testing.T) {
 	}
 }
 
+func TestRecordAgentEventUpdatesLiveSessionTelemetry(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1"}
+	o := New(nil, validConfig(), &fakeTracker{}, &recordingWorker{}, silentLogger())
+	o.state.Running[issue.ID] = domain.RunningEntry{Issue: issue, StartedAt: time.Now()}
+	eventAt := time.Date(2026, 5, 14, 12, 1, 0, 0, time.UTC)
+
+	o.recordAgentEvent(issue.ID, agent.Event{
+		Type:      agent.EventOtherMessage,
+		Timestamp: eventAt,
+		SessionID: "session-1",
+		ThreadID:  "thread-1",
+		TurnID:    "turn-1",
+		Raw:       json.RawMessage(`{"item":{"content":[{"text":"working through tests"}]}}`),
+		Usage:     agent.Usage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15},
+		RateLimits: &agent.RateLimitSnapshot{
+			LimitID: "codex",
+			Primary: &agent.RateLimitWindow{
+				UsedPercent: 70,
+			},
+		},
+	})
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	session := o.state.Running[issue.ID].Session
+	if session.SessionID != "session-1" || session.ThreadID != "thread-1" || session.TurnID != "turn-1" {
+		t.Fatalf("session ids = %+v, want session/thread/turn", session)
+	}
+	if session.LastEvent != string(agent.EventOtherMessage) || !session.LastTimestamp.Equal(eventAt) {
+		t.Fatalf("last event = %q at %v, want other_message at %v", session.LastEvent, session.LastTimestamp, eventAt)
+	}
+	if session.LastMessage != "working through tests" {
+		t.Fatalf("last message = %q, want summarized raw message", session.LastMessage)
+	}
+	if session.InputTokens != 10 || session.OutputTokens != 5 || session.TotalTokens != 15 {
+		t.Fatalf("tokens = %+v, want 10/5/15", session)
+	}
+	rateLimits, ok := session.RateLimits.(*agent.RateLimitSnapshot)
+	if !ok || rateLimits.LimitID != "codex" || rateLimits.Primary == nil || rateLimits.Primary.UsedPercent != 70 {
+		t.Fatalf("session rate limits = %+v", session.RateLimits)
+	}
+}
+
 func TestDispatchSkipsIssuesNeedingHumanReview(t *testing.T) {
 	t.Parallel()
 	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
@@ -800,8 +844,15 @@ func TestReconcile_CancelsStalledRunAndSchedulesRetry(t *testing.T) {
 	o.dispatchUpToCapacity(ctx, []domain.Issue{issue})
 	o.mu.Lock()
 	entry := o.state.Running[issue.ID]
+	entry.Session.SessionID = "session-1"
+	entry.Session.ThreadID = "thread-1"
+	entry.Session.TurnID = "turn-1"
 	entry.Session.LastEvent = string(agent.EventOtherMessage)
 	entry.Session.LastTimestamp = time.Now().Add(-time.Second)
+	entry.Session.InputTokens = 12
+	entry.Session.OutputTokens = 6
+	entry.Session.TotalTokens = 18
+	entry.Session.RateLimits = &agent.RateLimitSnapshot{LimitID: "live-codex"}
 	o.state.Running[issue.ID] = entry
 	o.mu.Unlock()
 
@@ -825,11 +876,97 @@ func TestReconcile_CancelsStalledRunAndSchedulesRetry(t *testing.T) {
 			if recentRuns[0].Status != domain.RunStatusStalled {
 				t.Fatalf("recent status = %q, want stalled", recentRuns[0].Status)
 			}
+			if recentRuns[0].SessionID != "session-1" || recentRuns[0].ThreadID != "thread-1" || recentRuns[0].TurnID != "turn-1" {
+				t.Fatalf("recent session ids = %+v", recentRuns[0])
+			}
+			if recentRuns[0].TotalTokens != 18 {
+				t.Fatalf("recent total tokens = %d, want 18", recentRuns[0].TotalTokens)
+			}
+			rateLimits, ok := recentRuns[0].RateLimits.(*agent.RateLimitSnapshot)
+			if !ok || rateLimits.LimitID != "live-codex" {
+				t.Fatalf("recent rate limits = %+v", recentRuns[0].RateLimits)
+			}
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("stalled run did not schedule retry")
+}
+
+func TestReconcile_StallDetectionFallsBackToStartedAt(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
+	tracker := &fakeTracker{
+		candidates: []domain.Issue{issue},
+		states:     map[string]string{issue.ID: "Ready"},
+	}
+	worker := &recordingWorker{waitForCancel: true}
+	cfg := validConfig()
+	cfg.Codex.StallTimeoutMs = 10
+	o := New(nil, cfg, tracker, worker, silentLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	o.dispatchUpToCapacity(ctx, []domain.Issue{issue})
+	o.mu.Lock()
+	entry := o.state.Running[issue.ID]
+	entry.StartedAt = time.Now().Add(-time.Second)
+	entry.Session.LastTimestamp = time.Time{}
+	o.state.Running[issue.ID] = entry
+	o.mu.Unlock()
+
+	o.reconcile(context.Background())
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		o.mu.Lock()
+		_, stalled := o.stalledRunning[issue.ID]
+		o.mu.Unlock()
+		if stalled {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("run was not marked stalled using started_at fallback")
+}
+
+func TestReconcile_DisabledStallDetectionDoesNotCancel(t *testing.T) {
+	t.Parallel()
+	issue := domain.Issue{ID: "uuid-1", Identifier: "SAM-1", State: "Ready", Labels: []string{"afk"}}
+	tracker := &fakeTracker{
+		candidates: []domain.Issue{issue},
+		states:     map[string]string{issue.ID: "Ready"},
+	}
+	worker := &recordingWorker{waitForCancel: true}
+	cfg := validConfig()
+	cfg.Codex.StallTimeoutMs = 0
+	o := New(nil, cfg, tracker, worker, silentLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	o.dispatchUpToCapacity(ctx, []domain.Issue{issue})
+	o.mu.Lock()
+	entry := o.state.Running[issue.ID]
+	entry.StartedAt = time.Now().Add(-time.Hour)
+	entry.Session.LastTimestamp = time.Now().Add(-time.Hour)
+	o.state.Running[issue.ID] = entry
+	o.mu.Unlock()
+
+	o.reconcile(context.Background())
+	time.Sleep(20 * time.Millisecond)
+
+	o.mu.Lock()
+	_, stalled := o.stalledRunning[issue.ID]
+	o.mu.Unlock()
+	worker.mu.Lock()
+	canceled := worker.canceled
+	worker.mu.Unlock()
+	if stalled {
+		t.Fatal("run marked stalled with disabled stall detection")
+	}
+	if canceled {
+		t.Fatal("worker canceled with disabled stall detection")
+	}
 }
 
 func TestCleanupTerminalWorkspaces(t *testing.T) {
@@ -939,6 +1076,18 @@ func TestStatusSnapshotIncludesRunningAndRetryingWork(t *testing.T) {
 		Issue:     issue,
 		StartedAt: now.Add(-5 * time.Second),
 		Attempt:   &attempt,
+		Session: domain.LiveSession{
+			SessionID:     "session-1",
+			ThreadID:      "thread-1",
+			TurnID:        "turn-1",
+			LastEvent:     string(agent.EventOtherMessage),
+			LastTimestamp: now.Add(-time.Second),
+			LastMessage:   "checking status",
+			InputTokens:   8,
+			OutputTokens:  3,
+			TotalTokens:   11,
+			RateLimits:    &agent.RateLimitSnapshot{LimitID: "live-codex"},
+		},
 	}
 	o.state.Claimed[issue.ID] = struct{}{}
 	o.state.Claimed[retryIssue.ID] = struct{}{}
@@ -988,6 +1137,22 @@ func TestStatusSnapshotIncludesRunningAndRetryingWork(t *testing.T) {
 	}
 	if snapshot.Running[0].DurationMs != 5000 {
 		t.Fatalf("duration_ms = %d, want 5000", snapshot.Running[0].DurationMs)
+	}
+	if snapshot.Running[0].SessionID != "session-1" || snapshot.Running[0].ThreadID != "thread-1" || snapshot.Running[0].TurnID != "turn-1" {
+		t.Fatalf("running session ids = %+v", snapshot.Running[0])
+	}
+	if snapshot.Running[0].LastEvent != string(agent.EventOtherMessage) || snapshot.Running[0].LastTimestamp == nil || !snapshot.Running[0].LastTimestamp.Equal(now.Add(-time.Second)) {
+		t.Fatalf("running last event = %+v", snapshot.Running[0])
+	}
+	if snapshot.Running[0].LastMessage != "checking status" {
+		t.Fatalf("running last message = %q, want checking status", snapshot.Running[0].LastMessage)
+	}
+	if snapshot.Running[0].TokenInfo.TotalTokens != 11 {
+		t.Fatalf("running token_info = %+v, want total 11", snapshot.Running[0].TokenInfo)
+	}
+	liveRateLimits, ok := snapshot.Running[0].RateLimits.(*agent.RateLimitSnapshot)
+	if !ok || liveRateLimits.LimitID != "live-codex" {
+		t.Fatalf("running rate_limits = %+v", snapshot.Running[0].RateLimits)
 	}
 	if len(snapshot.Retrying) != 1 || snapshot.Retrying[0].Identifier != "SAM-2" {
 		t.Fatalf("retrying = %+v, want SAM-2", snapshot.Retrying)

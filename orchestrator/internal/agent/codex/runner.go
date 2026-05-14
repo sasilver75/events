@@ -493,6 +493,7 @@ func (c *protocolClient) handleTurnMessage(ctx context.Context, msg rpcMessage, 
 			result.Error = "codex turn completed with unknown status: " + status
 		}
 		ev.Error = result.Error
+		ev.Message = result.Error
 		return ev, true, nil
 	case "error":
 		errMsg := gjsonString(msg.Params, "message")
@@ -503,6 +504,7 @@ func (c *protocolClient) handleTurnMessage(ctx context.Context, msg rpcMessage, 
 		result.Error = errMsg
 		ev.Type = agent.EventTurnFailed
 		ev.Error = errMsg
+		ev.Message = errMsg
 		return ev, true, nil
 	}
 	return ev, false, nil

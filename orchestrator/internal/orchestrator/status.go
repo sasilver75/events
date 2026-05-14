@@ -30,13 +30,20 @@ type StatusSnapshot struct {
 }
 
 type StatusRun struct {
-	IssueID    string    `json:"issue_id"`
-	Identifier string    `json:"identifier"`
-	State      string    `json:"state"`
-	Attempt    *int      `json:"attempt,omitempty"`
-	StartedAt  time.Time `json:"started_at"`
-	SessionID  string    `json:"session_id,omitempty"`
-	DurationMs int64     `json:"duration_ms"`
+	IssueID       string          `json:"issue_id"`
+	Identifier    string          `json:"identifier"`
+	State         string          `json:"state"`
+	Attempt       *int            `json:"attempt,omitempty"`
+	StartedAt     time.Time       `json:"started_at"`
+	SessionID     string          `json:"session_id,omitempty"`
+	ThreadID      string          `json:"thread_id,omitempty"`
+	TurnID        string          `json:"turn_id,omitempty"`
+	DurationMs    int64           `json:"duration_ms"`
+	LastEvent     string          `json:"last_event,omitempty"`
+	LastTimestamp *time.Time      `json:"last_timestamp,omitempty"`
+	LastMessage   string          `json:"last_message,omitempty"`
+	TokenInfo     StatusTokenInfo `json:"token_info"`
+	RateLimits    any             `json:"rate_limits,omitempty"`
 }
 
 type StatusRetry struct {
@@ -86,14 +93,30 @@ func (o *Orchestrator) StatusSnapshot(now time.Time) StatusSnapshot {
 
 	running := make([]StatusRun, 0, len(o.state.Running))
 	for id, entry := range o.state.Running {
+		var lastTimestamp *time.Time
+		if !entry.Session.LastTimestamp.IsZero() {
+			t := entry.Session.LastTimestamp
+			lastTimestamp = &t
+		}
 		running = append(running, StatusRun{
-			IssueID:    id,
-			Identifier: entry.Issue.Identifier,
-			State:      entry.Issue.State,
-			Attempt:    entry.Attempt,
-			StartedAt:  entry.StartedAt,
-			SessionID:  entry.Session.SessionID,
-			DurationMs: now.Sub(entry.StartedAt).Milliseconds(),
+			IssueID:       id,
+			Identifier:    entry.Issue.Identifier,
+			State:         entry.Issue.State,
+			Attempt:       entry.Attempt,
+			StartedAt:     entry.StartedAt,
+			SessionID:     entry.Session.SessionID,
+			ThreadID:      entry.Session.ThreadID,
+			TurnID:        entry.Session.TurnID,
+			DurationMs:    now.Sub(entry.StartedAt).Milliseconds(),
+			LastEvent:     entry.Session.LastEvent,
+			LastTimestamp: lastTimestamp,
+			LastMessage:   entry.Session.LastMessage,
+			TokenInfo: StatusTokenInfo{
+				InputTokens:  entry.Session.InputTokens,
+				OutputTokens: entry.Session.OutputTokens,
+				TotalTokens:  entry.Session.TotalTokens,
+			},
+			RateLimits: entry.Session.RateLimits,
 		})
 	}
 

@@ -35,6 +35,7 @@ type Event struct {
 	Raw        json.RawMessage
 	Usage      Usage
 	RateLimits *RateLimitSnapshot
+	Message    string
 	Error      string
 }
 
