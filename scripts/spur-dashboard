@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# spur-dashboard - local read-only UI for orchestrator status snapshots.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DASHBOARD_BIN="$REPO_ROOT/orchestrator/bin/spur-dashboard"
+DEFAULT_STATUS_DIR="/tmp/spur-orchestrator"
+DEFAULT_ADDR="127.0.0.1:8791"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  scripts/spur-dashboard [status-dir-or-file] [addr]
+  scripts/spur-dashboard --help
+
+Defaults:
+  status-dir: /tmp/spur-orchestrator
+  addr:        127.0.0.1:8791
+
+By default this aggregates every *.json snapshot in /tmp/spur-orchestrator.
+Pass a specific .json file to follow one daemon snapshot.
+EOF
+}
+
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  usage
+  exit 0
+fi
+
+target="${1:-$DEFAULT_STATUS_DIR}"
+addr="${2:-$DEFAULT_ADDR}"
+
+if [ ! -x "$DASHBOARD_BIN" ] || [ "$(find "$REPO_ROOT/orchestrator" -name '*.go' -newer "$DASHBOARD_BIN" 2>/dev/null | head -1)" ]; then
+  echo "==> Building spur-dashboard..."
+  (cd "$REPO_ROOT/orchestrator" && go build -o bin/spur-dashboard ./cmd/spur-dashboard)
+fi
+
+echo "==> Serving dashboard at http://$addr/"
+if [ -d "$target" ] || [[ "$target" != *.json ]]; then
+  echo "==> Watching $target/*.json"
+  exec "$DASHBOARD_BIN" --status-dir "$target" --addr "$addr"
+else
+  echo "==> Watching $target"
+  exec "$DASHBOARD_BIN" --status-file "$target" --addr "$addr"
+fi

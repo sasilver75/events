@@ -33,6 +33,8 @@ go run ./cmd/spur-orchestrator --once --issue SAM-12 --preflight --workflow ../W
 go run ./cmd/spur-orchestrator --once --issue SAM-12 --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/SAM-12-codex.json
 go run ./cmd/spur-orchestrator --codex-canary-verify-status --issue SAM-12 --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/SAM-12-codex.json
 go run ./cmd/spur-orchestrator --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/status.json
+go run ./cmd/spur-dashboard --status-dir /tmp/spur-orchestrator
+go run ./cmd/spur-dashboard --status-file /tmp/spur-orchestrator/status.json
 ```
 
 From the repo root:
@@ -40,7 +42,13 @@ From the repo root:
 ```sh
 scripts/spur-snapshot-codex.sh   # optional if the VM does not already have Codex auth
 scripts/spur-agent SAM-12
+scripts/spur-dashboard
 ```
+
+`spur-dashboard` is a local, read-only operator UI. By default it aggregates
+every JSON snapshot in `/tmp/spur-orchestrator`, which is useful when dogfooding
+supervised one-shot runs. Pass `--status-file` to follow one daemon
+orchestrator snapshot exactly.
 
 ## Status
 
@@ -62,9 +70,10 @@ Implemented:
 - Codex smoke check and issue preflight.
 - Polling state machine with bounded dispatch, retries, cancellation, continuation resume, and `agent.max_turns`.
 - Optional JSON status snapshots for daemon and one-shot runs.
+- Local read-only status dashboard backed by the JSON status snapshot.
 
 Still intentionally lightweight:
 
-- No dedicated dashboard; use structured logs and JSON status snapshots.
+- The dashboard is operator visibility only; issue comments, PRs, and Linear state transitions remain agent-owned.
 - Scheduler state is in memory; restart recovery is tracker/filesystem-driven.
 - Normal Linear comments/state transitions remain agent-owned per `WORKFLOW.md`.
