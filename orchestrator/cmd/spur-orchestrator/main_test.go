@@ -325,6 +325,7 @@ func TestWriteCodexCanaryChecklistUsesIssueIdentifier(t *testing.T) {
 		"Required status file `/tmp/spur-orchestrator/SAM-12-codex.json` exists and contains `agent_runner=codex`, `linear_access=host_proxy`, `recent_runs[0].identifier=SAM-12`, `recent_runs[0].status`, `recent_runs[0].session_id`, `recent_runs[0].thread_id`, `recent_runs[0].turn_id`, `recent_runs[0].token_info`, `recent_runs[0].rate_limits`",
 		"Issue state is `In Review`",
 		"`scripts/spur-publish-preflight SAM-12` passed before commit/push/PR creation.",
+		"PR is ready for review, not draft",
 		"No host-held Linear credential leaked",
 	} {
 		if !strings.Contains(got, want) {

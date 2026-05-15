@@ -116,9 +116,10 @@ func TestRenderAgentPromptUsesConciseContinuationForResume(t *testing.T) {
 		"Spur continuation: SAM-59",
 		"Resume session: session-1",
 		"Continuation attempt: 1",
-		"PR against main",
+		"ready-for-review PR against main",
 		"Linear closeout comment",
 		"Move the Linear issue to In Review",
+		"Draft PRs are only for explicitly requested drafts",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("continuation prompt missing %q:\n%s", want, out)

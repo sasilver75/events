@@ -66,10 +66,10 @@ func RenderContinuationPrompt(issue domain.Issue, attempt *int, resumeSessionID 
 	out += "Use the prior thread context and current repository state as authoritative. Do not restart the task or re-run the full original workflow unless current evidence shows it is necessary.\n\n"
 	out += "Finish only the missing work needed to hand off this issue:\n"
 	out += "1. Confirm the implementation and verification are complete for " + issue.Identifier + ".\n"
-	out += "2. Ensure there is a PR against main and that the PR title includes " + issue.Identifier + ".\n"
+	out += "2. Ensure there is a ready-for-review PR against main and that the PR title includes " + issue.Identifier + ".\n"
 	out += "3. Post the Linear closeout comment with the PR link, acceptance-criteria evidence, drift from spec if any, and artifacts if any.\n"
 	out += "4. Move the Linear issue to In Review.\n\n"
-	out += "If a required artifact already exists, do not duplicate it. If you discover a genuine blocker, post the blocker details on Linear and transition the issue to Needs Human.\n"
+	out += "If a required artifact already exists, do not duplicate it. Draft PRs are only for explicitly requested drafts, incomplete work, blockers, partial handoffs, or known human-decision needs; explain any draft condition in the Linear handoff. If you discover a genuine blocker, post the blocker details on Linear and transition the issue to Needs Human.\n"
 	return out
 }
 
