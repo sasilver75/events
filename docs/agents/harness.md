@@ -41,13 +41,13 @@ Implemented:
 - Preflight via `spur-orchestrator --once --preflight` or `--once --issue <SAM-N> --preflight`.
 - Polling orchestrator state machine with bounded dispatch, retries, continuation resume, cancellation, terminal cleanup, and `agent.max_turns`.
 - Dynamic `WORKFLOW.md` reload for prompt text, hooks, limits, active/terminal states, and Codex command/timeout settings.
+- Stall detection based on the latest Codex event timestamp, with cancellation and retry recorded as a `stalled` run.
 - Optional JSON status snapshots via `--status-file`, including running/retrying/needs-human work, recent runs, Codex token totals, and rate-limit telemetry.
 - Local read-only dashboard via `scripts/spur-dashboard`, backed by daemon snapshots or an aggregate directory of one-shot snapshots.
 - Successful-continuation loop guard that records `needs_human`, posts an escalation comment, and moves the Linear issue to `Needs Human`.
 
 Not implemented:
 
-- Full stall detection based on last Codex event timestamp. This remains a conformance/hardening item.
 - General-purpose host-side Linear mutations. Normal comments/state changes are still performed by the agent per `WORKFLOW.md`.
 
 ## Lifecycle

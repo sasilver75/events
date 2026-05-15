@@ -848,7 +848,7 @@
               <tr><td>Tracker</td><td>Linear project <code>Spur</code> with AFK/HITL policy.</td></tr>
               <tr><td>Workspace</td><td>Per-issue Tart macOS VM clone.</td></tr>
               <tr><td>Workflow</td><td>Same repo-owned contract, with hooks and Spur policy.</td></tr>
-              <tr><td>Runner</td><td>Codex app-server runner exists and has been verified by a canary run.</td></tr>
+              <tr><td>Runner</td><td>Codex app-server is the production runner.</td></tr>
               <tr><td>Tracker writes</td><td>Agent owns normal handoff; orchestrator only has narrow escalation writes.</td></tr>
             </table>
           </div>
@@ -1032,7 +1032,7 @@ flowchart LR
               <li><strong><code>orchestrator/internal/workflow</code></strong><br>Parses <code>WORKFLOW.md</code> front matter and renders issue prompts.</li>
               <li><strong><code>orchestrator/internal/tracker/linear</code></strong><br>Reads Linear issues and performs limited escalation writes.</li>
               <li><strong><code>orchestrator/internal/workspace/tart</code></strong><br>Creates, boots, prepares, and removes Tart VMs.</li>
-              <li><strong><code>orchestrator/internal/agent</code></strong><br>Defines the shared runner contract and concrete Codex/Claude runners.</li>
+              <li><strong><code>orchestrator/internal/agent</code></strong><br>Defines the shared runner contract and the Codex app-server integration.</li>
               <li><strong><code>orchestrator/internal/orchestrator</code></strong><br>Runs polling, dispatch, retry, cancellation, cleanup, and status recording.</li>
             </ul>
           </div>
@@ -1040,6 +1040,8 @@ flowchart LR
             <div class="label">Operations</div>
             <ul class="clean">
               <li><strong><code>scripts/spur-codex-canary</code></strong><br>Doctor, smoke, discover, preflight, run, verify, checklist.</li>
+              <li><strong><code>scripts/spur-agent</code></strong><br>One-shot supervised issue run through the same orchestrator path.</li>
+              <li><strong><code>scripts/spur-dashboard</code></strong><br>Local read-only dashboard over daemon or one-shot status snapshots.</li>
               <li><strong><code>scripts/spur-snapshot-codex.sh</code></strong><br>Filtered Codex identity snapshot for VMs.</li>
               <li><strong><code>scripts/spur-store-harness-secret</code></strong><br>Prompted helper for storing Linear/GitHub harness secrets.</li>
               <li><strong><code>/tmp/spur-orchestrator/*.json</code></strong><br>Status snapshots when requested.</li>
@@ -1072,16 +1074,21 @@ workspace:
   root: ~/.tart/vms
 
 agent:
-  runner: claudecode
+  runner: codex
   max_concurrent_agents: 2
+  max_concurrent_agents_by_state:
+    Ready: 2
+    In Progress: 1
   max_turns: 20
   max_unproductive_successes: 3
 
 credentials:
-  linear_access: vm_env
+  linear_access: host_proxy
 
 codex:
-  command: codex app-server stdio</pre>
+  command: codex app-server
+  stall_timeout_ms: 600000
+  approval_policy: never</pre>
           </div>
           <div class="panel">
             <div class="label">What it controls</div>
@@ -1132,7 +1139,7 @@ codex:
         </div>
         <div class="grid three">
           <div class="panel bg-green"><h3>Reload scope</h3><p>If a prompt, hook command, active state, timeout, or limit changes, future runs can pick it up while the service keeps running.</p></div>
-          <div class="panel bg-yellow"><h3>Restart-only change</h3><p>Switching between <code>claudecode</code> and <code>codex</code> requires restart or canary because the runner object is built at startup.</p></div>
+          <div class="panel bg-yellow"><h3>Guarded change</h3><p>The daemon skips live runner changes. Current validation supports <code>codex</code>, so runner changes require code/config review and restart.</p></div>
           <div class="panel bg-blue"><h3>Operational response</h3><p>Operators can tighten policy after a run exposes a gap, such as missing handoff comments, without stopping active work.</p></div>
         </div>
       </div>
@@ -1219,7 +1226,7 @@ codex:
           <div class="lane-cell bg-yellow"><strong>macOS guest</strong>Boots from <code>spur-base</code>.</div>
           <div class="lane-cell bg-green"><strong>Repo checkout</strong>Receives current issue snapshot and agent identity.</div>
           <div class="lane-cell bg-violet"><strong>Codex</strong>Edits files, runs tests, opens PR, comments on Linear via available tool path.</div>
-          <div class="lane-cell bg-teal"><strong>Logs</strong>Codex/Claude logs and build outputs are copied out.</div>
+          <div class="lane-cell bg-teal"><strong>Logs</strong>Codex logs and build outputs are copied out.</div>
           <div class="lane-cell bg-red"><strong>Disposable</strong>Terminal issues remove the VM.</div>
         </div>
         <div class="callout">
@@ -1284,12 +1291,12 @@ codex:
           <div class="panel bg-green">
             <div class="label">before_run</div>
             <h3>Every attempt setup</h3>
-            <p>Copies issue JSON, credentials boundary files, Codex or Claude identity snapshots, and refreshes Git remote auth.</p>
+            <p>Copies issue JSON, credentials boundary files, optional Codex identity snapshots, and refreshes Git remote auth.</p>
           </div>
           <div class="panel bg-yellow">
             <div class="label">after_run</div>
             <h3>Attempt artifact copy</h3>
-            <p>Copies Claude project logs, Codex logs, and issue snapshots out to the run log directory.</p>
+            <p>Copies Codex logs and issue snapshots out to the run log directory.</p>
           </div>
           <div class="panel bg-red">
             <div class="label">before_remove</div>
@@ -1319,7 +1326,7 @@ codex:
       <div>
         <div class="kicker">Runner interface</div>
         <h2>The orchestrator talks to runners through one shared contract.</h2>
-        <p class="lede">Claude and Codex are concrete implementations. The worker does not need to know every protocol detail; it needs a start/resume result, events, telemetry, and final status.</p>
+        <p class="lede">Codex is the concrete implementation behind the shared runner contract. The worker does not need every protocol detail; it needs a start/resume result, events, telemetry, and final status.</p>
       </div>
       <div class="content">
         <div class="grid two">
@@ -1336,10 +1343,10 @@ codex:
             </table>
           </div>
           <div class="panel">
-            <div class="label">Concrete runners</div>
+            <div class="label">Runner surface</div>
             <div class="status-list">
               <div class="status-row"><span class="tag">codex</span><p>Starts <code>codex app-server</code> over SSH, initializes JSON-RPC, starts or resumes a thread, starts a turn, handles dynamic tool requests, and captures telemetry.</p></div>
-              <div class="status-row"><span class="tag">claudecode</span><p>Streams Claude Code headless output over SSH and now fits the same result/event model. Useful as legacy fallback, but not where future investment should go if Codex is the production direction.</p></div>
+              <div class="status-row"><span class="tag">contract</span><p>The shared interface keeps worker orchestration separate from app-server protocol mechanics, but current config validation only accepts <code>codex</code>.</p></div>
             </div>
           </div>
         </div>
@@ -1441,7 +1448,7 @@ sequenceDiagram
       <div>
         <div class="kicker">Credential boundary</div>
         <h2>Codex supports keeping the Linear token on the host.</h2>
-        <p class="lede"><code>vm_env</code> injects Linear access into the VM. <code>host_proxy</code> keeps Linear access on the host and exposes only a scoped GraphQL tool to the agent.</p>
+        <p class="lede"><code>host_proxy</code> is the production credential mode: Linear access stays on the host and Codex receives only a scoped GraphQL tool. <code>vm_env</code> remains a supported compatibility mode.</p>
       </div>
       <div class="content">
         <div class="grid two">
@@ -1452,7 +1459,7 @@ sequenceDiagram
               <li>Hook writes <code>LINEAR_API_KEY</code> for agent use.</li>
               <li>Works for simple CLI/API calls.</li>
               <li>Token exposure includes the guest environment.</li>
-              <li>Still the literal default in the merged <code>WORKFLOW.md</code> until you flip production.</li>
+              <li>Not the production default in the current <code>WORKFLOW.md</code>.</li>
             </ul>
           </div>
           <div class="panel bg-green">
@@ -1818,8 +1825,8 @@ stateDiagram-v2
           <div class="panel">
             <div class="label">What the fields mean</div>
             <div class="status-list">
-              <div class="status-row"><span class="tag">agent_runner</span><p>Which runner mode produced the snapshot: <code>codex</code> or <code>claudecode</code>.</p></div>
-              <div class="status-row"><span class="tag">linear_access</span><p>Credential mode: <code>vm_env</code> or <code>host_proxy</code>.</p></div>
+              <div class="status-row"><span class="tag">agent_runner</span><p>Which runner mode produced the snapshot. Current production value is <code>codex</code>.</p></div>
+              <div class="status-row"><span class="tag">linear_access</span><p>Credential mode recorded in the snapshot. Current production value is <code>host_proxy</code>.</p></div>
               <div class="status-row"><span class="tag">recent_runs</span><p>Per-run evidence: issue, status, timestamps, session/thread/turn IDs, tokens, and rate limits.</p></div>
               <div class="status-row"><span class="tag">needs_human</span><p>Issues stopped by the unproductive-success guard.</p></div>
               <div class="status-row"><span class="tag">workflow_*</span><p>Path and modification time of the workflow contract used.</p></div>
@@ -1880,7 +1887,7 @@ scripts/spur-codex-canary checklist SAM-54</pre>
           <div class="step"><div class="num">run</div><h3>real VM turn</h3><p>Boot VM, run hooks, launch Codex, collect status.</p></div>
           <div class="step"><div class="num">verify</div><h3>status check</h3><p>Validate JSON says <code>codex</code>, <code>host_proxy</code>, succeeded.</p></div>
           <div class="step"><div class="num">checklist</div><h3>operator audit</h3><p>Inspect Linear comments, PR, CI, logs, telemetry.</p></div>
-          <div class="step"><div class="num">decide</div><h3>production</h3><p>Switch defaults or run another canary.</p></div>
+          <div class="step"><div class="num">decide</div><h3>operate</h3><p>Use the verified status artifact to decide whether to keep dispatching or inspect manually.</p></div>
         </div>
         <div class="callout">
           <p><strong>SAM-54 result:</strong> the canary completed in a Tart VM, opened PR #102, reached Linear <code>In Review</code>, emitted Codex session/thread/turn telemetry, and was later merged and marked Done.</p>
@@ -2000,7 +2007,7 @@ scripts/spur-codex-canary checklist SAM-54</pre>
           </div>
           <div class="panel bg-red">
             <h3>Agent timeout or stall</h3>
-            <p>Runner returns a timeout/stall error, worker integrates the failure, and the orchestrator decides retry or stop by configured limits.</p>
+            <p>Reconciliation cancels a worker after <code>stall_timeout_ms</code> without agent events, records <code>stalled</code>, then retries or stops by configured limits.</p>
           </div>
           <div class="panel bg-blue">
             <h3>Issue changed underneath</h3>
@@ -2025,32 +2032,35 @@ scripts/spur-codex-canary checklist SAM-54</pre>
     <section class="slide" data-title="Production Posture">
       <div>
         <div class="kicker">Production posture</div>
-        <h2>The Codex path is verified, but <code>WORKFLOW.md</code> still controls the production default.</h2>
-        <p class="lede">The merged workflow still keeps Claude as the literal default, while the canary verified the Codex runner and host-proxy path. Moving production to Codex requires changing the workflow defaults.</p>
+        <h2>The production posture is Codex inside disposable macOS VMs with host-held Linear credentials.</h2>
+        <p class="lede">The current workflow defaults to the Codex app-server runner, keeps Linear access on the host through <code>host_proxy</code>, and gives Codex high trust inside the isolated Tart guest.</p>
       </div>
       <div class="content">
         <div class="grid two">
           <div class="panel dark">
-            <div class="label">Current merged default</div>
-            <pre>agent:
-  runner: claudecode
-
-credentials:
-  linear_access: vm_env</pre>
-          </div>
-          <div class="panel dark">
-            <div class="label">Codex-only production default</div>
+            <div class="label">Current runner default</div>
             <pre>agent:
   runner: codex
+  max_concurrent_agents: 2
+  max_unproductive_successes: 3
 
 credentials:
   linear_access: host_proxy</pre>
           </div>
+          <div class="panel dark">
+            <div class="label">Codex trust policy</div>
+            <pre>codex:
+  command: codex app-server
+  approval_policy: never
+  thread_sandbox: danger-full-access
+  turn_sandbox_policy:
+    type: dangerFullAccess</pre>
+          </div>
         </div>
         <div class="grid three">
-          <div class="panel"><h3>What changes</h3><p>Daemon dispatch starts Codex by default and keeps Linear on the host.</p></div>
-          <div class="panel"><h3>What stays</h3><p>Linear policy, Tart VMs, hooks, GitHub PR flow, status snapshots, and handoff prompt remain the same.</p></div>
-          <div class="panel"><h3>What to keep briefly</h3><p>The Claude runner can remain as a fallback implementation until you are comfortable deleting legacy code.</p></div>
+          <div class="panel"><h3>Security boundary</h3><p>The VM is disposable and isolated; Codex can work freely inside it without host approval prompts.</p></div>
+          <div class="panel"><h3>Credential boundary</h3><p>GitHub access enters the VM for repo work; Linear access stays on the host and is exposed through <code>linear_graphql</code>.</p></div>
+          <div class="panel"><h3>Operator boundary</h3><p>Status snapshots and the dashboard show live work, retry state, rate limits, and escalation evidence without mutating Linear.</p></div>
         </div>
       </div>
     </section>
@@ -2065,8 +2075,8 @@ credentials:
           <div class="panel">
             <table>
               <tr><th>Term</th><th>Meaning</th></tr>
-              <tr><td>runner mode</td><td>Which agent backend is active: <code>codex</code> or <code>claudecode</code>.</td></tr>
-              <tr><td>credential mode</td><td>How Linear access reaches the agent: <code>vm_env</code> or <code>host_proxy</code>.</td></tr>
+              <tr><td>runner mode</td><td>Which agent backend is active. Current supported production value is <code>codex</code>.</td></tr>
+              <tr><td>credential mode</td><td>How Linear access is handled. Production uses <code>host_proxy</code>; <code>vm_env</code> remains a compatibility mode.</td></tr>
               <tr><td>workspace</td><td>The isolated per-issue Tart VM.</td></tr>
               <tr><td>claim</td><td>The orchestrator's in-memory ownership of an issue while a worker is running.</td></tr>
               <tr><td>turn</td><td>One agent attempt or continuation segment.</td></tr>
@@ -2108,7 +2118,7 @@ credentials:
         </div>
         <p class="lede">The repo owns policy, the orchestrator owns isolation and scheduling, and the agent owns implementation and handoff.</p>
       </div>
-      <div class="footer-note"><span>Deck file: <code>explainers/symphony-harness.html</code></span><span>Last updated from merged PR #103 state.</span></div>
+      <div class="footer-note"><span>Deck file: <code>explainers/symphony-harness.html</code></span><span>Last updated from current orchestrator implementation.</span></div>
     </section>
 
   </main>
