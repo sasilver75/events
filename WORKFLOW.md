@@ -274,6 +274,16 @@ test — diagnose it (`/diagnose`).
 
 ### 6. Commit
 
+Before committing, run:
+
+```sh
+scripts/spur-publish-preflight {{ issue.identifier }}
+```
+
+If it reports a branch/issue mismatch, do not commit. Create a clean branch
+from `origin/main` for {{ issue.identifier }} and carry over only the intended
+diff, or escalate to `Needs Human` if the intended diff cannot be separated.
+
 Conventional prose commit messages. Subject is imperative + concise; body
 explains *why*, not *what*. Pre-commit hooks must pass; never use `--no-verify`.
 
@@ -287,6 +297,11 @@ PR description must include:
 - Linear ticket link: `Linear: [{{ issue.identifier }}]({{ issue.url }})`.
 - A condensed line: "Agent self-assessment: N/M ACs met — see {{ issue.identifier }} for details."
 - For UI work: inline screenshots or links to the recorded videos.
+
+Immediately before pushing or creating the PR, run
+`scripts/spur-publish-preflight {{ issue.identifier }}` again. If the current
+branch appears to belong to a different Linear issue, stop with the warning
+instead of stacking this issue's PR on another issue's branch.
 
 Push the branch with `git push -u origin <branch>` (the `GITHUB_TOKEN`
 fine-grained PAT has the necessary scopes). Then `gh pr create`.

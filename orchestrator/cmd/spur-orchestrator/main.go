@@ -405,6 +405,7 @@ func writeCodexCanaryChecklist(out io.Writer, issueIdentifier string) {
 	writeln(out, "[ ] Issue state is `In Review` after the PR is opened.")
 	writeln(out)
 	writeln(out, "GitHub handoff:")
+	writef(out, "[ ] `scripts/spur-publish-preflight %s` passed before commit/push/PR creation.\n", issueIdentifier)
 	writeln(out, "[ ] Branch was pushed.")
 	writeln(out, "[ ] PR title includes the issue identifier.")
 	writeln(out, "[ ] PR body links the Linear issue and includes self-assessment.")

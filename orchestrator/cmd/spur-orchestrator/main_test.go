@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -323,6 +324,7 @@ func TestWriteCodexCanaryChecklistUsesIssueIdentifier(t *testing.T) {
 		"`spur-orchestrator --codex-canary-verify-status --issue SAM-12 --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/SAM-12-codex.json` exited 0.",
 		"Required status file `/tmp/spur-orchestrator/SAM-12-codex.json` exists and contains `agent_runner=codex`, `linear_access=host_proxy`, `recent_runs[0].identifier=SAM-12`, `recent_runs[0].status`, `recent_runs[0].session_id`, `recent_runs[0].thread_id`, `recent_runs[0].turn_id`, `recent_runs[0].token_info`, `recent_runs[0].rate_limits`",
 		"Issue state is `In Review`",
+		"`scripts/spur-publish-preflight SAM-12` passed before commit/push/PR creation.",
 		"No host-held Linear credential leaked",
 	} {
 		if !strings.Contains(got, want) {
@@ -338,6 +340,96 @@ func TestWriteCodexCanaryChecklistUsesPlaceholder(t *testing.T) {
 
 	if got := out.String(); !strings.Contains(got, "Codex run evidence checklist for <SAM-N>") {
 		t.Fatalf("checklist missing placeholder:\n%s", got)
+	}
+}
+
+func TestPublishPreflightScriptAllowsMatchingIssueBranch(t *testing.T) {
+	repo := newPublishPreflightRepo(t)
+	git(t, repo, "switch", "-c", "sam-64-publish-preflight")
+
+	got, err := runPublishPreflightScript(repo, "SAM-64")
+	if err != nil {
+		t.Fatalf("publish preflight failed: %v\n%s", err, got)
+	}
+	if !strings.Contains(got, "publish preflight passed") {
+		t.Fatalf("preflight output missing success:\n%s", got)
+	}
+}
+
+func TestPublishPreflightScriptRejectsDifferentIssueBranch(t *testing.T) {
+	repo := newPublishPreflightRepo(t)
+	git(t, repo, "switch", "-c", "sam-60-fleet-dashboard")
+
+	got, err := runPublishPreflightScript(repo, "SAM-64")
+	if err == nil {
+		t.Fatalf("publish preflight passed unexpectedly:\n%s", got)
+	}
+	for _, want := range []string{
+		"branch/issue mismatch",
+		"appears to belong to SAM-60",
+		"active Linear issue is SAM-64",
+		"Risk: accidentally stacking one Linear issue on another issue's branch.",
+		"Create a clean branch from origin/main",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("preflight output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestPublishPreflightScriptRejectsOtherIssueCommitRefs(t *testing.T) {
+	repo := newPublishPreflightRepo(t)
+	git(t, repo, "switch", "-c", "sam-64-publish-preflight")
+	if err := os.WriteFile(filepath.Join(repo, "work.txt"), []byte("stacked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "add", "work.txt")
+	git(t, repo, "commit", "-m", "feat: previous ticket work (SAM-60)")
+
+	got, err := runPublishPreflightScript(repo, "SAM-64")
+	if err == nil {
+		t.Fatalf("publish preflight passed unexpectedly:\n%s", got)
+	}
+	for _, want := range []string{
+		"branch contains commits for another Linear issue",
+		"SAM-60",
+		"Risk: accidentally stacking one Linear issue on another issue's branch.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("preflight output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func newPublishPreflightRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "config", "user.name", "Test User")
+	git(t, repo, "config", "user.email", "test@example.com")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "add", "README.md")
+	git(t, repo, "commit", "-m", "initial commit")
+	git(t, repo, "branch", "-M", "main")
+	git(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+	return repo
+}
+
+func runPublishPreflightScript(repo, issue string) (string, error) {
+	script := filepath.Clean(filepath.Join("..", "..", "..", "scripts", "spur-publish-preflight"))
+	cmd := exec.Command("bash", script, issue, "--repo", repo)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }
 
