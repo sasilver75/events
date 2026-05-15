@@ -44,3 +44,17 @@ Branch naming (optional but recommended for human readability):
 ```
 sam-12-feedback-flow
 ```
+
+## Reviewer-agent comments
+
+Harness-created PRs may receive one machine review pass before human review.
+Reviewer-agent feedback is labeled separately from human review:
+
+- GitHub review body starts with `> _Reviewer-agent feedback for SAM-N._`
+- Linear mirror comment starts with `> _Reviewer-agent feedback posted for SAM-N._`
+- Any bounded implementer response starts with `> _Implementer-agent response for SAM-N._` on GitHub and `> _Implementer-agent response attempted for SAM-N._` on Linear.
+
+Reviewer-agent mode never approves or merges. A successful reviewer pass leaves
+the Linear issue in `In Review` for the human merge gate. Failed, timed out, or
+ambiguous review states move to `Needs Human` or leave an explicit
+operator-facing status file.
