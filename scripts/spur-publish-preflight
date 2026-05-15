@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Guard the Linear issue -> branch boundary before publishing work.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/spur-publish-preflight <SAM-id> [--repo <path>] [--base <ref>]
+
+Checks that the current branch belongs to the active Linear issue before
+committing, pushing, or opening a PR. Default base ref: origin/main.
+EOF
+}
+
+issue_id=""
+repo=""
+base_ref="origin/main"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --repo)
+      if [ $# -lt 2 ]; then
+        echo "missing value for --repo" >&2
+        usage >&2
+        exit 2
+      fi
+      repo="$2"
+      shift 2
+      ;;
+    --base)
+      if [ $# -lt 2 ]; then
+        echo "missing value for --base" >&2
+        usage >&2
+        exit 2
+      fi
+      base_ref="$2"
+      shift 2
+      ;;
+    -*)
+      echo "unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      if [ -n "$issue_id" ]; then
+        echo "unexpected argument: $1" >&2
+        usage >&2
+        exit 2
+      fi
+      issue_id="$1"
+      shift
+      ;;
+  esac
+done
+
+if [ -z "$issue_id" ]; then
+  echo "missing Linear issue id" >&2
+  usage >&2
+  exit 2
+fi
+
+issue_id="$(printf '%s' "$issue_id" | tr '[:lower:]' '[:upper:]')"
+if ! [[ "$issue_id" =~ ^SAM-[0-9]+$ ]]; then
+  echo "invalid Linear issue id: $issue_id" >&2
+  exit 2
+fi
+
+if [ -n "$repo" ]; then
+  cd "$repo"
+fi
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+branch="$(git branch --show-current)"
+if [ -z "$branch" ]; then
+  echo "publish preflight: detached HEAD" >&2
+  echo "Active Linear issue is $issue_id, but this checkout is not on a named issue branch." >&2
+  echo "Risk: accidentally stacking one Linear issue on another issue's branch." >&2
+  echo "Create a clean branch from $base_ref for $issue_id, then carry over only the intended diff." >&2
+  exit 1
+fi
+
+branch_issue="$(printf '%s' "$branch" | sed -nE 's/.*([sS][aA][mM]-[0-9]+).*/\1/p' | head -1 | tr '[:lower:]' '[:upper:]')"
+if [ "$branch_issue" != "$issue_id" ]; then
+  echo "publish preflight: branch/issue mismatch" >&2
+  if [ -n "$branch_issue" ]; then
+    echo "Current branch '$branch' appears to belong to $branch_issue, but active Linear issue is $issue_id." >&2
+  else
+    echo "Current branch '$branch' does not include active Linear issue $issue_id." >&2
+  fi
+  echo "Risk: accidentally stacking one Linear issue on another issue's branch." >&2
+  echo "Create a clean branch from $base_ref for $issue_id, then carry over only the intended diff." >&2
+  exit 1
+fi
+
+if git rev-parse --verify --quiet "$base_ref" >/dev/null; then
+  other_issue_refs="$(
+    git log --format=%s "$base_ref"..HEAD |
+      grep -Eio 'SAM-[0-9]+' |
+      tr '[:lower:]' '[:upper:]' |
+      sort -u |
+      grep -vFx "$issue_id" || true
+  )"
+  if [ -n "$other_issue_refs" ]; then
+    echo "publish preflight: branch contains commits for another Linear issue" >&2
+    echo "Current branch '$branch' is for $issue_id, but commits not on $base_ref reference:" >&2
+    printf '  %s\n' $other_issue_refs >&2
+    echo "Risk: accidentally stacking one Linear issue on another issue's branch." >&2
+    echo "Create a clean branch from $base_ref for $issue_id, then carry over only the intended diff." >&2
+    exit 1
+  fi
+else
+  echo "publish preflight: warning: base ref '$base_ref' not found; skipped unmerged commit scan" >&2
+fi
+
+echo "publish preflight passed: issue=$issue_id branch=$branch base=$base_ref"

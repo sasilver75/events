@@ -23,6 +23,18 @@ Bypass with `git push --no-verify` when you know what you're doing.
 
 `spur-agent` dispatches one Linear issue through the default production runner.
 
+`spur-publish-preflight` guards the final publish path. Run it before
+committing, pushing, or opening a PR for a Linear issue:
+
+```sh
+scripts/spur-publish-preflight SAM-12
+```
+
+It stops when the current branch appears to belong to another `SAM-N`, because
+that usually means the work would stack one Linear issue on another issue's
+branch. Create a clean branch from `origin/main` and carry over only the
+intended diff before publishing.
+
 `spur-dashboard` serves a local read-only dashboard for harness status
 snapshots. With no arguments it aggregates `/tmp/spur-orchestrator/*.json`;
 pass a file to follow one daemon snapshot:
