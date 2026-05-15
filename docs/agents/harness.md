@@ -97,9 +97,14 @@ boundary: the agent has high trust inside the disposable guest, not on the host.
 The publication contract lives in `WORKFLOW.md`, not the orchestrator. The
 agent is responsible for:
 
-1. Creating a PR against `main` with the Linear issue identifier in the title.
+1. Creating a ready-for-review PR against `main` with the Linear issue identifier in the title.
 2. Posting a Linear closeout comment with PR link, AC table, drift list, and test evidence.
 3. Moving the issue from `In Progress` to `In Review`.
+
+Completed, verified AFK work should not be published as a draft PR. Drafts are
+reserved for explicitly requested drafts, incomplete work, blockers, partial
+handoffs, or known human-decision needs, and the Linear handoff should name the
+reason.
 
 ## Operator Dashboard
 

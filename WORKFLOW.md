@@ -202,7 +202,7 @@ Do not end a successful run until all of these are true:
 
 - The issue has a pickup comment for this attempt.
 - The issue state is `In Progress` while you are working.
-- Your branch is pushed and a PR against `main` exists.
+- Your branch is pushed and a ready-for-review PR against `main` exists.
 - The PR description links to {{ issue.identifier }} and includes the required self-assessment line.
 - The Linear closeout comment exists and uses the exact structure in step 8.
 - The issue state is `In Review`.
@@ -292,6 +292,13 @@ explains *why*, not *what*. Pre-commit hooks must pass; never use `--no-verify`.
 Title format: `<type>: <summary> ({{ issue.identifier }})`
 Example: `feat: post-event feedback flow (SAM-12)`
 
+Completed, verified issue work opens a ready-for-review PR by default. Do not
+create a draft PR for successful AFK work. Draft PRs are reserved for explicitly
+requested drafts, incomplete work, blockers, partial handoffs, or known
+human-decision needs; when one of those applies, explain the draft condition in
+the PR body and Linear handoff. For normal successful runs, use `gh pr create`
+without `--draft`.
+
 PR description must include:
 - One-line summary of what changed.
 - Linear ticket link: `Linear: [{{ issue.identifier }}]({{ issue.url }})`.
@@ -332,7 +339,10 @@ Post a comment on {{ issue.identifier }} with this exact structure:
 ### 9. Transition to In Review
 
 Move the Linear issue from `In Progress` to `In Review`. This is the
-handoff signal.
+handoff signal for completed work with a ready-for-review PR. If the handoff is
+a draft because of an explicit draft request, incomplete work, a blocker, a
+partial handoff, or a known human-decision need, say so in the Linear comment
+instead of presenting it as a normal ready review.
 
 Before exiting, re-check the required handoff artifacts list above. If the PR
 exists but the closeout comment or `In Review` transition is missing, complete
@@ -364,7 +374,7 @@ landed migrations.
 A reviewer opening {{ issue.identifier }} in Linear sees:
 - State: `In Review`
 - A closeout comment with the AC table, drift list, and artifacts inline
-- A PR link, with a green CI run
+- A ready-for-review PR link, with a green CI run
 
 The reviewer can decide trust-and-skim or zoom-in on the diff, without
 needing to reconstruct what you did or why.

@@ -83,6 +83,10 @@ Use `/tdd` for non-trivial features: red → green → refactor.
 - **PR titles** → append the Linear ID to the title (e.g.
   `feat: post-event feedback flow (SAM-12)`). Linear's GitHub integration
   auto-detects the SAM-id and links the PR to the issue.
+- **PR readiness** → completed, verified issue work opens a ready-for-review
+  PR by default. Use a draft PR only when a draft was explicitly requested, the
+  work is incomplete or blocked, the handoff is partial, or a known
+  human-decision need remains.
 - **Commits** → conventional prose; WHY in the message body.
 - **Closeouts** → On every issue close, leave a comment. "Shipped per spec —
   <commit>" when the AC was met as written; a short drift list (what diverged
