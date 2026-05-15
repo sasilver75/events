@@ -16,6 +16,10 @@
 //	spur-orchestrator --once --issue SAM-12 --preflight
 //	                               → validate credentials, tracker eligibility,
 //	                                 and Codex app-server without dispatching
+//	spur-orchestrator --once --issue SAM-12 --review-pr 123
+//	                               → run one reviewer-agent pass for a
+//	                                 harness-created PR, optionally followed
+//	                                 by one bounded implementer response
 //	spur-orchestrator --once --preflight
 //	                               → list eligible Codex candidates
 //	spur-orchestrator --codex-canary-checklist --issue SAM-12
@@ -79,6 +83,9 @@ func main() {
 		codexCanaryChecklist = flag.Bool("codex-canary-checklist", false, "Print the post-run evidence checklist for a Codex run and exit")
 		codexCanaryVerify    = flag.Bool("codex-canary-verify-status", false, "Validate a local Codex status JSON proof file without contacting Linear, then exit")
 		preflight            = flag.Bool("preflight", false, "Validate credentials, tracker access, target issue eligibility, and Codex handshake without dispatching")
+		reviewPR             = flag.String("review-pr", "", "Run reviewer-agent mode for this GitHub PR number or URL; requires --once and --issue")
+		reviewImplementer    = flag.Bool("review-allow-implementer-response", false, "Allow at most one bounded implementer-agent response turn when reviewer-agent reports actionable comments")
+		reviewImplTimeoutMs  = flag.Int("review-implementer-timeout-ms", 1800000, "Timeout for the optional implementer-agent response turn")
 		statusFile           = flag.String("status-file", "", "Optional path for runtime JSON status snapshots, or status verifier input")
 		verbose              = flag.Bool("verbose", false, "Log at debug level")
 	)
@@ -141,6 +148,9 @@ func main() {
 		if err := validatePreflightLocalReadiness(cfg, *issue != ""); err != nil {
 			fatal(logger, "preflight readiness failed", "err", err)
 		}
+	}
+	if err := validateReviewerModeArgs(*reviewPR, *once, *issue); err != nil {
+		fatal(logger, "reviewer mode argument error", "err", err)
 	}
 
 	// 2. Resolve credentials from env.
@@ -212,6 +222,39 @@ func main() {
 			CodexHarnessDir: codexHarnessDir,
 		},
 		Logger: logger,
+	}
+	if *reviewPR != "" {
+		reviewIssue, err := tracker.FetchIssueByIdentifier(ctx, *issue)
+		if err != nil {
+			fatal(logger, "review issue fetch failed", "issue", *issue, "err", err)
+		}
+		result := worker.RunReviewLoop(ctx, orchestrator.ReviewLoopRequest{
+			Issue:                    reviewIssue,
+			PullRequest:              *reviewPR,
+			AllowImplementerResponse: *reviewImplementer,
+			ImplementerTurnTimeoutMs: *reviewImplTimeoutMs,
+		}, nil)
+		if *statusFile != "" {
+			if err := writeJSONFile(*statusFile, result); err != nil {
+				fatal(logger, "review status write failed", "path", *statusFile, "err", err)
+			}
+		}
+		fmt.Printf("Review loop complete: issue=%s pr=%s state=%s actionable=%t needs_human=%t\n",
+			result.IssueIdentifier, result.PullRequest, result.State, result.ActionableComments, result.NeedsHuman)
+		if result.NeedsHuman {
+			reason := result.ReviewerError
+			if reason == "" {
+				reason = result.ImplementerError
+			}
+			if reason == "" {
+				reason = "reviewer_agent_needs_human"
+			}
+			if err := tracker.EscalateNeedsHuman(ctx, reviewIssue, reason, 1); err != nil {
+				fatal(logger, "needs-human escalation failed", "err", err)
+			}
+			os.Exit(2)
+		}
+		return
 	}
 	orch := orchestrator.New(def, cfg, tracker, worker, logger)
 	orch.Eligibility = eligibility
@@ -286,6 +329,31 @@ func validatePreflightCredentials(githubToken string) error {
 		return errors.New("SPUR_HARNESS_GITHUB_TOKEN is not set")
 	}
 	return nil
+}
+
+func validateReviewerModeArgs(reviewPR string, once bool, issueIdentifier string) error {
+	if reviewPR == "" {
+		return nil
+	}
+	if !once {
+		return errors.New("--review-pr requires --once")
+	}
+	if issueIdentifier == "" {
+		return errors.New("--review-pr requires --issue")
+	}
+	return nil
+}
+
+func writeJSONFile(path string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
 }
 
 func validatePreflightLocalReadiness(cfg workflow.ServiceConfig, requireRunCredentials bool) error {

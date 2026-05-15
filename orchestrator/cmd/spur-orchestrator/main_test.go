@@ -135,6 +135,36 @@ func TestValidatePreflightCredentialsRequiresGitHubToken(t *testing.T) {
 	}
 }
 
+func TestValidateReviewerModeArgs(t *testing.T) {
+	if err := validateReviewerModeArgs("123", true, "SAM-12"); err != nil {
+		t.Fatalf("validateReviewerModeArgs returned error: %v", err)
+	}
+	for _, tt := range []struct {
+		name  string
+		pr    string
+		once  bool
+		issue string
+		want  string
+	}{
+		{name: "not reviewer mode", pr: "", once: false, issue: "", want: ""},
+		{name: "requires once", pr: "123", once: false, issue: "SAM-12", want: "--once"},
+		{name: "requires issue", pr: "123", once: true, issue: "", want: "--issue"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateReviewerModeArgs(tt.pr, tt.once, tt.issue)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateWorkflowConfigForModeAllowsOfflineStatusVerificationWithoutLinearKey(t *testing.T) {
 	t.Setenv("SPUR_TEST_LINEAR_KEY", "")
 	t.Setenv("LINEAR_API_KEY", "")

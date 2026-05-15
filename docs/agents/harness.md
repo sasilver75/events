@@ -45,6 +45,9 @@ Implemented:
 - Optional JSON status snapshots via `--status-file`, including running/retrying/needs-human work, recent runs, Codex token totals, and rate-limit telemetry.
 - Local read-only dashboard via `scripts/spur-dashboard`, backed by daemon snapshots or an aggregate directory of one-shot snapshots.
 - Successful-continuation loop guard that records `needs_human`, posts an escalation comment, and moves the Linear issue to `Needs Human`.
+- Explicit reviewer-agent one-shot mode for harness-created PRs, with a bounded
+  state model, structured GitHub review prompt, optional single implementer
+  response turn, and Needs Human escalation on failed or ambiguous review states.
 
 Not implemented:
 
@@ -105,6 +108,55 @@ Completed, verified AFK work should not be published as a draft PR. Drafts are
 reserved for explicitly requested drafts, incomplete work, blockers, partial
 handoffs, or known human-decision needs, and the Linear handoff should name the
 reason.
+
+## Reviewer-Agent Loop
+
+Reviewer-agent mode is for PRs created by the harness after implementation has
+completed and the Linear issue is already `In Review`. It is an additional
+machine review pass, not a replacement for human approval. Use it when an
+operator wants a structured correctness review before spending human attention;
+use manual review instead when the PR involves product judgment, architecture
+tradeoffs, unclear acceptance criteria, or any decision that requires HITL
+ownership.
+
+Run one reviewer pass:
+
+```sh
+go run ./cmd/spur-orchestrator --workflow ../WORKFLOW.md --once --issue SAM-12 --review-pr 123
+```
+
+Allow the implementer-agent one bounded follow-up turn only when the
+reviewer-agent reports concrete actionable comments:
+
+```sh
+go run ./cmd/spur-orchestrator --workflow ../WORKFLOW.md --once --issue SAM-12 --review-pr 123 --review-allow-implementer-response
+```
+
+The review loop state model is:
+
+1. `implementation_complete`: the implementer opened a PR, posted closeout, and moved Linear to `In Review`.
+2. `reviewer_pass_requested`: the explicit reviewer-agent entry point is running.
+3. `review_posted`: reviewer-agent feedback was posted to GitHub and Linear.
+4. `implementer_response_attempted`: at most one bounded implementer response turn ran.
+5. `final_human_merge_gate`: automation is finished; a human owns approval and merge.
+6. `needs_human`: missing context, failed reviewer/implementer turns, ambiguous CI, or judgment-heavy review states require operator attention.
+
+The reviewer-agent prompt requires inspection of the PR diff, PR metadata and
+CI status, the Linear issue and closeout comments, and relevant repo docs. Its
+GitHub review body starts with `> _Reviewer-agent feedback for SAM-N._` and
+focuses on correctness, regressions, missing tests, and unmet acceptance
+criteria. It must not approve, request changes, or merge.
+
+If the optional implementer response runs, its comments start with
+`> _Implementer-agent response for SAM-N._` on GitHub and
+`> _Implementer-agent response attempted for SAM-N._` on Linear. The
+implementer response is limited to concrete reviewer-agent findings that can be
+addressed in one turn. The loop never runs multiple review/response cycles.
+
+Failure, timeout, a missing reviewer result, or a reviewer-declared ambiguous
+state moves the issue to `Needs Human` through the existing Linear escalation
+path. Successful reviewer mode leaves the issue in `In Review`; final merge
+remains human-owned.
 
 ## Operator Dashboard
 

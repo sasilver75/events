@@ -185,6 +185,57 @@ func TestFetchIssueStatesByIDs(t *testing.T) {
 	}
 }
 
+func TestFetchIssueByIdentifier(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if !strings.Contains(req.Query, "IssueByIdentifier") {
+			t.Fatalf("query = %s, want IssueByIdentifier", req.Query)
+		}
+		if req.Variables["identifier"] != "SAM-61" {
+			t.Fatalf("identifier variable = %v", req.Variables["identifier"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"issue":{
+			"id":"uuid-61",
+			"identifier":"SAM-61",
+			"title":"Reviewer loop",
+			"description":"Body",
+			"priority":4,
+			"branchName":"sam-61-reviewer-agent-loop",
+			"url":"https://linear.app/samcorp/issue/SAM-61",
+			"createdAt":"2026-05-10T12:00:00.000Z",
+			"updatedAt":"2026-05-10T13:00:00.000Z",
+			"assignee":{"id":"user-1"},
+			"state":{"name":"In Review"},
+			"labels":{"nodes":[{"name":"AFK"}]},
+			"inverseRelations":{"nodes":[]}
+		}}}`))
+	}))
+	defer srv.Close()
+
+	c, _ := New(Config{Endpoint: srv.URL, APIKey: "lin_api_test", ProjectSlug: "spur"})
+	issue, err := c.FetchIssueByIdentifier(context.Background(), "SAM-61")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.Identifier != "SAM-61" || issue.State != "In Review" {
+		t.Fatalf("issue = %+v", issue)
+	}
+	if issue.Priority == nil || *issue.Priority != 4 {
+		t.Fatalf("priority = %v, want 4", issue.Priority)
+	}
+	if len(issue.Labels) != 1 || issue.Labels[0] != "afk" {
+		t.Fatalf("labels = %v", issue.Labels)
+	}
+}
+
 func TestFetchIssuesByStates_Paginates(t *testing.T) {
 	t.Parallel()
 	var afterSeen []any

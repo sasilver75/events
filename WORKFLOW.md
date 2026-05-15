@@ -348,6 +348,36 @@ Before exiting, re-check the required handoff artifacts list above. If the PR
 exists but the closeout comment or `In Review` transition is missing, complete
 those missing steps immediately.
 
+## Optional reviewer-agent mode
+
+After a harness-created PR exists and the issue is `In Review`, an operator may
+run a separate reviewer-agent pass with:
+
+```sh
+go run ./cmd/spur-orchestrator --workflow ../WORKFLOW.md --once --issue {{ issue.identifier }} --review-pr <PR number or URL>
+```
+
+Reviewer-agent mode is for correctness review of harness-created PRs. It
+inspects the PR diff, PR metadata and CI status, the Linear issue and closeout
+comment, and relevant repo docs. It posts GitHub feedback starting with
+`> _Reviewer-agent feedback for {{ issue.identifier }}._` and mirrors status to
+Linear with `> _Reviewer-agent feedback posted for {{ issue.identifier }}._`.
+It focuses on correctness, regressions, missing tests, and unmet acceptance
+criteria.
+
+If the reviewer-agent reports actionable comments, the operator may add
+`--review-allow-implementer-response` to permit exactly one bounded
+implementer-agent response turn. That response must start GitHub and Linear
+comments with `> _Implementer-agent response ..._`, address only concrete
+reviewer-agent findings, and leave unresolved human-judgment items explicit.
+
+The loop state model is `implementation_complete` →
+`reviewer_pass_requested` → `review_posted` →
+optional `implementer_response_attempted` → `final_human_merge_gate`.
+Failures, timeouts, missing review output, ambiguous CI, or judgment-heavy
+states go to `needs_human`. The loop never auto-merges; final approval and
+merge remain human-owned.
+
 ## Edge cases
 
 **You realize the issue is HITL.** If, during implementation, you discover

@@ -31,6 +31,7 @@ go run ./cmd/spur-orchestrator --codex-smoke --workflow ../WORKFLOW.md
 go run ./cmd/spur-orchestrator --once --preflight --workflow ../WORKFLOW.md
 go run ./cmd/spur-orchestrator --once --issue SAM-12 --preflight --workflow ../WORKFLOW.md
 go run ./cmd/spur-orchestrator --once --issue SAM-12 --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/SAM-12-codex.json
+go run ./cmd/spur-orchestrator --once --issue SAM-12 --review-pr 123 --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/SAM-12-review.json
 go run ./cmd/spur-orchestrator --codex-canary-verify-status --issue SAM-12 --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/SAM-12-codex.json
 go run ./cmd/spur-orchestrator --workflow ../WORKFLOW.md --status-file /tmp/spur-orchestrator/status.json
 go run ./cmd/spur-dashboard --status-dir /tmp/spur-orchestrator
@@ -68,6 +69,7 @@ Implemented:
 - Host lifecycle hooks from `WORKFLOW.md`.
 - Codex app-server initialize, thread start/resume, turn start, completion/error handling, dynamic tools, token telemetry, and rate-limit telemetry.
 - Codex smoke check and issue preflight.
+- Reviewer-agent one-shot mode for harness-created PRs, with structured review prompts, optional single implementer response turn, and Needs Human escalation for failed or ambiguous review states.
 - Polling state machine with bounded dispatch, retries, cancellation, continuation resume, and `agent.max_turns`.
 - Optional JSON status snapshots for daemon and one-shot runs.
 - Local read-only status dashboard backed by the JSON status snapshot.

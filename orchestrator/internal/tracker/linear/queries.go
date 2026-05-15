@@ -73,6 +73,31 @@ query IssueStatesByIDs($issueIds: [ID!]!) {
 }
 `
 
+const queryIssueByIdentifier = `
+query IssueByIdentifier($identifier: String!) {
+  issue(id: $identifier) {
+    id
+    identifier
+    title
+    description
+    priority
+    branchName
+    url
+    createdAt
+    updatedAt
+    assignee { id name email }
+    state { name }
+    labels { nodes { name } }
+    inverseRelations {
+      nodes {
+        type
+        issue { id identifier state { name } createdAt updatedAt }
+      }
+    }
+  }
+}
+`
+
 // queryTerminalIssues fetches issues in $states (used at startup to remove
 // stale workspaces from terminal-state issues). Symphony spec §8.6.
 const queryTerminalIssues = `

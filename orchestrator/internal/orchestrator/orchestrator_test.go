@@ -220,6 +220,53 @@ func TestSpurWorkerAgentTurnConfigCredentialModes(t *testing.T) {
 	}
 }
 
+func TestReviewerAgentPromptCapturesBoundedReviewContract(t *testing.T) {
+	t.Parallel()
+	prompt := renderReviewerAgentPrompt(ReviewLoopRequest{
+		Issue:       domain.Issue{Identifier: "SAM-61"},
+		PullRequest: "123",
+	}, ".spur-agent/reviewer-result.json")
+
+	for _, want := range []string{
+		"reviewer-agent for harness-created PR 123",
+		"gh pr diff 123",
+		"statusCheckRollup",
+		"Linear issue SAM-61",
+		"CLAUDE.md, CONTEXT.md, PRD-v0.md, docs/adr/, docs/agents/",
+		"Reviewer-agent feedback for SAM-61",
+		"correctness, regressions, missing tests, and unmet acceptance criteria",
+		"Do not use GitHub approval or request-changes states",
+		".spur-agent/reviewer-result.json",
+		"actionable_comments",
+		"needs_human",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("reviewer prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestImplementerReviewResponsePromptIsBounded(t *testing.T) {
+	t.Parallel()
+	prompt := renderImplementerReviewResponsePrompt(ReviewLoopRequest{
+		Issue:       domain.Issue{Identifier: "SAM-61"},
+		PullRequest: "123",
+	})
+
+	for _, want := range []string{
+		"exactly one bounded continuation turn",
+		"gh pr view 123",
+		"Address only concrete reviewer-agent findings",
+		"never merge",
+		"Implementer-agent response for SAM-61",
+		"Final merge remains human-owned",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("implementer prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestRunOnce_DispatchesSingleIssue(t *testing.T) {
 	t.Parallel()
 	issue := domain.Issue{

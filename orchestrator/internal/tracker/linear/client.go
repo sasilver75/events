@@ -162,6 +162,22 @@ func (c *Client) FetchIssueStatesByIDs(ctx context.Context, ids []string) (map[s
 	return out, nil
 }
 
+// FetchIssueByIdentifier returns one issue by its Linear identifier (for
+// example, SAM-12). Reviewer mode uses this because In Review issues are not
+// part of normal AFK dispatch eligibility.
+func (c *Client) FetchIssueByIdentifier(ctx context.Context, identifier string) (domain.Issue, error) {
+	var resp struct {
+		Issue *rawIssue `json:"issue"`
+	}
+	if err := c.do(ctx, queryIssueByIdentifier, map[string]any{"identifier": identifier}, &resp); err != nil {
+		return domain.Issue{}, err
+	}
+	if resp.Issue == nil {
+		return domain.Issue{}, fmt.Errorf("%w: issue %s not found", ErrLinearUnknownPayload, identifier)
+	}
+	return resp.Issue.normalize(), nil
+}
+
 // FetchIssuesByStates returns all issues currently in any of the given
 // states. Used at startup for terminal-workspace cleanup (spec §8.6).
 func (c *Client) FetchIssuesByStates(ctx context.Context, states []string) ([]domain.Issue, error) {
